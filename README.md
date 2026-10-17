@@ -81,4 +81,122 @@ python -m tests.test_ollama_client
 
 A successful run prints a proposed resolution, an explanation, and the assumptions and risks.
 
+## Model evaluation using the selected smoke cases
+
+Run the following commands from the project root. These steps reuse the ten smoke case IDs already saved in `evaluation/cases.json`. **Do not run `prepare` again.** The 200-case test partition is not run.
+
+### 7. Check the evaluation files
+
+Ensure these files are present:
+
+```text
+src/evaluation.py
+src/resolver/ollama_client.py
+tests/test_evaluation.py
+evaluation/cases.json
+data/model_inputs.jsonl
+data/evaluation_references.jsonl
+```
+
+Download the two JSONL files from the team's Google Drive into `data/`. Use the dataset version used to create `cases.json`; the evaluator checks its checksum.
+
+### 8. Activate your environment and run the unit tests
+
+On macOS/Linux:
+
+```bash
+source .venv/bin/activate
+python -m pytest tests/test_evaluation.py -v
+```
+
+These unit tests check the evaluation logic without calling Ollama. Continue once they pass.
+
+### 9. Choose whether you need new predictions
+
+### Rescore predictions that already exist
+
+If `results/smoke_predictions.jsonl` already contains the predictions you want to evaluate, run only:
+
+```bash
+python -m src.evaluation score --split smoke --predictions results/smoke_predictions.jsonl --out-dir results/smoke_scores
+```
+
+This does not contact Ollama or change the saved predictions. It replaces `per_case.csv` and `summary.json` in the output folder. The same predictions and scoring rules should produce the same scores.
+
+The current prediction schema uses a `resolution` field. Old predictions with `initial_resolution`/`final_resolution` require the compatibility fallback in `score()` or conversion before use. No fallback is needed for new outputs.
+
+If you only need to rescore saved predictions, skip generation and go to step 11 to inspect the results.
+
+### Generate predictions for the ten smoke cases
+
+Keep the Jupyter session and SSH tunnel running, and confirm that `.env` matches your current session.
+
+For a first run, when the output file does not exist:
+
+```bash
+python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions.jsonl
+```
+
+This sends each selected conflicted file to the existing Ollama client and saves the resolution, rationale, assumptions, status and runtime. Reference answers are not sent to the model.
+
+Generation processes cases sequentially and prints a status after each finishes. With the current non-streaming client, there can be several minutes without terminal output. The default per-request timeout is 300 seconds.
+
+If the prediction file already exists and you want a fresh run on the same cases, use a new filename:
+
+```bash
+python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions_rerun.jsonl
+```
+
+Use another new filename if that file also exists. New model responses may differ even though the selected cases stay the same.
+
+### 10. Score the predictions
+
+For the first-run prediction file:
+
+```bash
+python -m src.evaluation score --split smoke --predictions results/smoke_predictions.jsonl --out-dir results/smoke_scores
+```
+
+If you used the rerun filename instead:
+
+```bash
+python -m src.evaluation score --split smoke --predictions results/smoke_predictions_rerun.jsonl --out-dir results/smoke_scores_rerun
+```
+
+Scoring uses the reference answers locally and does not require Ollama. Running it again replaces `per_case.csv` and `summary.json` in the specified output folder.
+
+### 11. Inspect the results
+
+| Output | Contents |
+|---|---|
+| `per_case.csv` | Each case's status, exact match, AST match, compilation success, conflict-marker check and compilation diagnostics |
+| `summary.json` | Aggregate scores, difficulty breakdown, latency and checksums |
+| Prediction JSONL | Generated resolutions, rationale, assumptions, timing and errors |
+| Prediction `.meta.json` | Settings used for reproducibility and resume checks |
+
+Errors and missing predictions count as failures in the overall score denominator. Check error messages before interpreting low scores as resolution-quality failures.
+
+Compilation does not execute the generated code or prove behavioral correctness. The ten-case smoke run checks the pipeline; it is not a final performance estimate.
+
+### 12. Resume an interrupted generation, if needed
+
+Use the same options and output path as the interrupted run, adding `--resume`. For example:
+
+```bash
+python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions.jsonl --resume
+```
+
+Keep the accompanying `.meta.json` file. Resume requires matching settings and skips every saved case, including errors. It does not retry failed cases. Use a new output filename for a fresh run.
+
+### 13. Optional: compare commit context
+
+Use the same selected smoke cases with commit messages supplied as context:
+
+```bash
+python -m src.evaluation generate --split smoke --mode commit_context --output results/smoke_commit_context.jsonl
+python -m src.evaluation score --split smoke --predictions results/smoke_commit_context.jsonl --out-dir results/smoke_commit_context_scores
+```
+
+This is a commit-context comparison, not a full retrieval/RAG evaluation.
+
 ---
