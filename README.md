@@ -7,7 +7,7 @@ VS Code (your computer)  --SSH tunnel-->  GPU compute node (Ollama + model)
 http://localhost:<PORT>                   127.0.0.1:<PORT>
 ```
 
-### 3. Create your `.env` file
+### 1. Create your `.env` file
 
 The resolver reads its settings from a `.env` file in the project root. Copy the template:
 
@@ -21,7 +21,7 @@ cp .env.example .env        # Windows: copy .env.example .env
 
 ## Each working session
 
-### 4. Start Ollama on the GPU cluster
+### 2. Start Ollama on the GPU cluster
 
 1. SSH into the university cluster using the provided login instructions.
 2. In the terminal, enter `mynotebook` and request a GPU.
@@ -41,7 +41,7 @@ Note down these three values:
 
 The compute node and port can **change every session**, so check them each time.
 
-### 5. Open the SSH tunnel and update `.env`
+### 3. Open the SSH tunnel and update `.env`
 
 In VS Code, open a **new local terminal** (on your own computer, not on the cluster). Run the following, replacing the placeholders. `<PORT>` appears twice: the local port, then the cluster port.
 
@@ -63,7 +63,7 @@ OLLAMA_MODEL=gemma4:e2b
 
 `OLLAMA_MODEL` must be one of the models the notebook listed.
 
-### 6. Test the connection
+### 4. Test the connection
 
 In a **second** terminal, check that the tunnel works:
 
