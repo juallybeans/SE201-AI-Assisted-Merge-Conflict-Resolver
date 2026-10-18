@@ -1,7 +1,7 @@
 # AI Use Log: Emma Foo
 
 ## 2026-10-18 · CLI entry point and integration
-- **Tool (model):** Claude
+- **Tool (model):** Claude Code (Opus 5.5)
 - **Files:** src/cli.py, examples/sample_conflict.py
 - **Outcome:** Changed
 
