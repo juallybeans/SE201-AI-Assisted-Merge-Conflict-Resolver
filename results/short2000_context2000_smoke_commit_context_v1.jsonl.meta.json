@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "inputs_sha256": "62276295d6fb24904cdcbfae131b1ae7f237302b17ee20da7afee5afa55b154e",
+  "manifest_sha256": "a66e230e44011b981135b310ebbb943b4343f340c56eba1d3b04d879d7b0d6e8",
+  "split": "smoke",
+  "mode": "commit_context",
+  "client": "src.resolver.ollama_client",
+  "client_sha256": "c931d4dd4211da31101f31f7defe9c3b68d4a3d54fcfc5e8d72750f958a878d7",
+  "model": "gemma4:e2b",
+  "base_url": "http://localhost:60199",
+  "timeout": 120,
+  "python": "3.11.5",
+  "note": "Generation settings are inherited from client; current supplied client does not fix seed/temperature or report truncation."
+}
