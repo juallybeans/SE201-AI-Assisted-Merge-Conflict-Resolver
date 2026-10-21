@@ -152,7 +152,8 @@ def generate(a):
                 if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
                     raise ValueError('Client returned no nonempty string resolution')
                 row.update(status='ok', resolution=answer['resolution'],
-                           rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''))
+                           rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
+                           done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'))
             except Exception as exc:
                 row['error'] = f'{type(exc).__name__}: {exc}'
             row['latency_seconds'] = time.monotonic() - start
