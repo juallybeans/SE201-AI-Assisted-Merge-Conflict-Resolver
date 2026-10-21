@@ -84,6 +84,14 @@ The resolution field must contain code only, without Markdown fences.
         "format": "json",
         "stream": False,
         "keep_alive": "30m",
+        # Cap output so a model stuck repeating itself in JSON mode
+        # cannot generate until the client times out.
+        "options": {
+            "num_predict": 1024,
+            "num_ctx": 8192,
+            "temperature": 0,
+            "seed": 0,
+        },
     }
 
     try:
@@ -120,6 +128,10 @@ The resolution field must contain code only, without Markdown fences.
             raise OllamaResolverError(
                 "The proposed resolution is empty."
             )
+
+        # "length" means generation stopped at the num_predict cap.
+        parsed["done_reason"] = result.get("done_reason", "")
+        parsed["eval_count"] = result.get("eval_count")
 
         return parsed
 
