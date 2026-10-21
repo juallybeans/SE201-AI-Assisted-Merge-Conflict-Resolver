@@ -82,7 +82,7 @@ The resolution field must contain code only, without Markdown fences.
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "format": "json",
-        "stream": False,
+        "stream": True,
         "keep_alive": "30m",
         # Cap output so a model stuck repeating itself in JSON mode
         # cannot generate until the client times out.
@@ -95,15 +95,24 @@ The resolution field must contain code only, without Markdown fences.
     }
 
     try:
-        response = requests.post(
+        chunks = []
+        result = {}
+        with requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json=payload,
+            stream=True,
             timeout=timeout,
-        )
-        response.raise_for_status()
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                result = json.loads(line)
+                chunks.append(result.get("response", ""))
+                if result.get("done"):
+                    break
 
-        result = response.json()
-        generated_text = result.get("response", "")
+        generated_text = "".join(chunks)
 
         if not generated_text.strip():
             raise OllamaResolverError(

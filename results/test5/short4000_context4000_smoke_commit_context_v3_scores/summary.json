@@ -1,0 +1,98 @@
+{
+  "overall": {
+    "total": 5,
+    "statuses": {
+      "ok": 5
+    },
+    "exact_match": {
+      "passed": 0,
+      "denominator": 5,
+      "rate": 0.0
+    },
+    "ast_match": {
+      "passed": 1,
+      "denominator": 5,
+      "rate": 0.2
+    },
+    "compile_pass": {
+      "passed": 5,
+      "denominator": 5,
+      "rate": 1.0
+    },
+    "marker_free": {
+      "passed": 5,
+      "denominator": 5,
+      "rate": 1.0
+    },
+    "reference_compile_failures": 0,
+    "mean_latency_seconds": 6.880539108603261,
+    "latency_record_count": 5
+  },
+  "by_difficulty": {
+    "easy": {
+      "total": 2,
+      "statuses": {
+        "ok": 2
+      },
+      "exact_match": {
+        "passed": 0,
+        "denominator": 2,
+        "rate": 0.0
+      },
+      "ast_match": {
+        "passed": 0,
+        "denominator": 2,
+        "rate": 0.0
+      },
+      "compile_pass": {
+        "passed": 2,
+        "denominator": 2,
+        "rate": 1.0
+      },
+      "marker_free": {
+        "passed": 2,
+        "denominator": 2,
+        "rate": 1.0
+      },
+      "reference_compile_failures": 0,
+      "mean_latency_seconds": 3.1474752715148497,
+      "latency_record_count": 2
+    },
+    "hard": {
+      "total": 3,
+      "statuses": {
+        "ok": 3
+      },
+      "exact_match": {
+        "passed": 0,
+        "denominator": 3,
+        "rate": 0.0
+      },
+      "ast_match": {
+        "passed": 1,
+        "denominator": 3,
+        "rate": 0.3333333333333333
+      },
+      "compile_pass": {
+        "passed": 3,
+        "denominator": 3,
+        "rate": 1.0
+      },
+      "marker_free": {
+        "passed": 3,
+        "denominator": 3,
+        "rate": 1.0
+      },
+      "reference_compile_failures": 0,
+      "mean_latency_seconds": 9.36924833332887,
+      "latency_record_count": 3
+    }
+  },
+  "inputs_sha256": "62276295d6fb24904cdcbfae131b1ae7f237302b17ee20da7afee5afa55b154e",
+  "references_sha256": "1df181e134bc26f6fd98d986673eade2f0d3597bc4a7e5eb56e00747cbeb1443",
+  "predictions_sha256": "8797e0a326c6e9bfda17ff705a8b8a7c436c8192afc36ca1d8d22d984a2362e6",
+  "manifest_sha256": "d383cbc63a411add1f00645ecc35c68e85f89f9cbd169d42d19fcbd6f2ff5727",
+  "python": "3.12.3",
+  "split": "smoke",
+  "policy": "All selected cases in denominators, including missing/errors/abstentions. Exact match normalizes line endings only. Invalid references flagged, never silently excluded. AST match is not behavioral equivalence."
+}

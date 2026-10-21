@@ -1,0 +1,6 @@
+case_id,difficulty,status,latency_seconds,reference_compile_pass,reference_ast_parseable,error,exact_match,ast_match,compile_pass,marker_free,compile_error
+nvidia/nemo/7894f2c8604aa48ed7b40c468b6bb8dea5cd2f30/nemo/collections/diffusion/vae/__init__.py,hard,ok,6.387188500026241,True,True,,False,True,True,True,
+pennylaneai/pennylane/c2e46b3ba2d312a83e6626d375d4b2562e944597/pennylane/_version.py,easy,ok,3.4587193339830264,True,True,,False,False,True,True,
+langchain-ai/langchain/e08017fcf7c9cc6213a0951984e522e04a2098b9/libs/community/tests/integration_tests/llms/test_volcengine_maas.py,hard,ok,10.818624083010945,True,True,,False,False,True,True,
+kivy/python-for-android/745dc6754aed5479fd3101af636c34feed357c72/pythonforandroid/__init__.py,easy,ok,3.0826835830230266,True,True,,False,False,True,True,
+pyro-ppl/pyro/5d1610c3ccb1297d342b4800f52b04e5d2288b6e/pyro/distributions/testing/fakes.py,hard,ok,10.850869291985873,True,True,,False,False,True,True,
