@@ -56,3 +56,18 @@ Claude's first guess, that the model was generating without stopping, was wrong.
 ### What I kept or changed
 I made the edits myself from Claude's line-by-line instructions. I kept the output-length cap and switched the request to streaming.
 
+## 2026-10-23 · Fixing the 50-case dev run failures
+- **Tool (model):** Claude Code (Claude Opus 5.5)
+- **Files:** src/resolver/ollama_client.py, src/evaluation.py, 01-ollama.ipynb (cluster notebook)
+- **Outcome:** Kept
+
+### What I asked for
+Help working out why the 50-case dev run kept failing partway through, and how to get all cases to run in one go.
+
+### How I checked it
+The saved results showed that after about 25 cases, every request waited the full timeout and got no reply, so the Ollama server had stopped answering. Claude found the cause in the notebook that starts Ollama: its output went to a pipe that nothing read, so Ollama froze once the pipe filled up. This was likely also behind the earlier commit-context timeouts. I also hit the cluster's idle auto-logout and some cases where the model returned a missing or non-text explanation. After the fixes, I reran the dev cases and checked the results file for errors.
+
+### What I kept or changed
+I changed the notebook to write Ollama's output to a log file. I added retries for failed cases, let a missing explanation or assumptions field pass instead of failing the case, and raised the output cap to 4096 tokens. Claude wrote the code changes; I reviewed them and applied them myself.
+
+
