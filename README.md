@@ -15,7 +15,7 @@ The resolver reads its settings from a `.env` file in the project root. Copy the
 cp .env.example .env        # Windows: copy .env.example .env
 ```
 
-`.env` is git-ignored, so each team member keeps their own copy. You will fill in the port in step 5.
+`.env` is git-ignored, so each team member keeps their own copy. You will fill in the port in step 3.
 
 ---
 
@@ -71,7 +71,7 @@ In a **second** terminal, check that the tunnel works:
 curl http://localhost:<PORT>/api/tags
 ```
 
-You should see JSON listing the models on the cluster. If you get `Failed to connect`, the tunnel or the Jupyter session is down. Go back to steps 4–5.
+You should see JSON listing the models on the cluster. If you get `Failed to connect`, the tunnel or the Jupyter session is down. Go back to steps 2–3.
 
 Then run the resolver on a sample conflict:
 
@@ -127,7 +127,7 @@ The current prediction schema uses a `resolution` field. Old predictions with `i
 
 If you only need to rescore saved predictions, skip generation and go to step 11 to inspect the results.
 
-### Generate predictions for the ten smoke cases
+### Generate predictions for the five smoke cases
 
 Keep the Jupyter session and SSH tunnel running, and confirm that `.env` matches your current session.
 
@@ -147,7 +147,7 @@ If the prediction file already exists and you want a fresh run on the same cases
 python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions_rerun.jsonl
 ```
 
-Use another new filename if that file also exists. New model responses may differ even though the selected cases stay the same.
+Use another new filename if that file also exists.
 
 ### 10. Score the predictions
 
@@ -188,15 +188,18 @@ python -m src.evaluation generate --split smoke --mode conflict_only --output re
 
 Keep the accompanying `.meta.json` file. Resume requires matching settings and skips every saved case, including errors. It does not retry failed cases. Use a new output filename for a fresh run.
 
-### 13. Optional: compare commit context
+### 13. Run the 50 dev cases
 
-Use the same selected smoke cases with commit messages supplied as context:
+Run both modes on the 50-case `dev` split of the short-input manifest, then score each one. Use the same `--manifest` and `--split` for `generate` and `score`.
 
 ```bash
-python -m src.evaluation generate --split smoke --mode commit_context --output results/smoke_commit_context.jsonl
-python -m src.evaluation score --split smoke --predictions results/smoke_commit_context.jsonl --out-dir results/smoke_commit_context_scores
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode conflict_only --timeout 120 --output results/short4000_dev_conflict_only.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_conflict_only.jsonl --out-dir results/short4000_dev_conflict_only_scores
+
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode commit_context --timeout 120 --output results/short4000_dev_commit_context.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_commit_context.jsonl --out-dir results/short4000_dev_commit_context_scores
 ```
 
-This is a commit-context comparison, not a full retrieval/RAG evaluation.
+Compare the two `summary.json` files to see whether commit context changes the scores.
 
 ---
