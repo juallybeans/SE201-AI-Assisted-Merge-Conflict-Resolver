@@ -83,11 +83,11 @@ The resolution field must contain code only, without Markdown fences.
         "prompt": prompt,
         "format": "json",
         "stream": True,
-        "keep_alive": "30m",
+        "keep_alive": "2h",
         # Cap output so a model stuck repeating itself in JSON mode
         # cannot generate until the client times out.
         "options": {
-            "num_predict": 1024,
+            "num_predict": 4096,
             "num_ctx": 8192,
             "temperature": 0,
             "seed": 0,
@@ -126,6 +126,19 @@ The resolution field must contain code only, without Markdown fences.
             "explanation",
             "assumptions",
         )
+
+        # Small models sometimes return a list or object for the
+        # free-text fields; keep it as text rather than failing.
+        for field in ("explanation", "assumptions"):
+            value = parsed.get(field)
+            if isinstance(value, list):
+                parsed[field] = "\n".join(str(item) for item in value)
+            elif isinstance(value, dict):
+                parsed[field] = json.dumps(value, ensure_ascii=False)
+            elif value is None:
+                parsed[field] = ""
+            elif not isinstance(value, str):
+                parsed[field] = str(value)
 
         for field in required_fields:
             if not isinstance(parsed.get(field), str):

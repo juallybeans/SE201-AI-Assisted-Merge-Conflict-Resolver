@@ -145,18 +145,26 @@ def generate(a):
             context = ''
             if a.mode == 'commit_context':
                 context = 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
-            row = dict(case_id=key, method=a.mode, status='error')
-            start = time.monotonic()
-            try:
-                answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
-                if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
-                    raise ValueError('Client returned no nonempty string resolution')
-                row.update(status='ok', resolution=answer['resolution'],
-                           rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
-                           done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'))
-            except Exception as exc:
-                row['error'] = f'{type(exc).__name__}: {exc}'
-            row['latency_seconds'] = time.monotonic() - start
+            # Retry so a brief server stall does not fail the case outright.
+            retries = getattr(a, 'retries', 0)
+            for attempt in range(1, retries + 2):
+                row = dict(case_id=key, method=a.mode, status='error', attempts=attempt)
+                start = time.monotonic()
+                try:
+                    answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
+                    if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
+                        raise ValueError('Client returned no nonempty string resolution')
+                    row.update(status='ok', resolution=answer['resolution'],
+                               rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
+                               done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'))
+                except Exception as exc:
+                    row['error'] = f'{type(exc).__name__}: {exc}'
+                row['latency_seconds'] = time.monotonic() - start
+                if row['status'] == 'ok' or attempt > retries:
+                    break
+                wait = getattr(a, 'retry_wait', 0) * attempt
+                print(f'{i}/{len(ids)} attempt {attempt} failed, retrying in {wait}s: {row["error"]}', flush=True)
+                time.sleep(wait)
             f.write(json.dumps(row, ensure_ascii=False) + '\n')
             f.flush()
             print(f'{i}/{len(ids)} {row["status"]} {key}', flush=True)
@@ -281,6 +289,8 @@ def main():
             p.add_argument('--output', required=True)
             p.add_argument('--timeout', type=int, default=300)
             p.add_argument('--resume', action='store_true')
+            p.add_argument('--retries', type=int, default=2, help='Extra attempts per failed case')
+            p.add_argument('--retry-wait', type=int, default=30, help='Seconds before the first retry; grows with each attempt')
         else:
             p.add_argument('--references', default='data/evaluation_references.jsonl')
             p.add_argument('--predictions', required=True)
