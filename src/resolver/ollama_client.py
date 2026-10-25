@@ -81,7 +81,15 @@ The resolution field must contain code only, without Markdown fences.
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
-        "format": "json",
+        "format": {
+            "type": "object",
+            "properties": {
+                "resolution": {"type": "string"},
+                "explanation": {"type": "string"},
+                "assumptions": {"type": "string"},
+            },
+            "required": ["resolution", "explanation", "assumptions"],
+        },
         "stream": True,
         "keep_alive": "2h",
         # Cap output so a model stuck repeating itself in JSON mode
@@ -113,6 +121,15 @@ The resolution field must contain code only, without Markdown fences.
                     break
 
         generated_text = "".join(chunks)
+
+        if not result.get("done"):
+            raise OllamaResolverError(
+                "Ollama stream ended before the reply was complete."
+            )
+        if result.get("done_reason") == "length":
+            raise OllamaResolverError(
+                "Reply hit the num_predict cap before finishing."
+            )
 
         if not generated_text.strip():
             raise OllamaResolverError(

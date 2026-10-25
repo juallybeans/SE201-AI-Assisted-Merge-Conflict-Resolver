@@ -1,0 +1,127 @@
+{
+  "overall": {
+    "total": 50,
+    "statuses": {
+      "ok": 50
+    },
+    "exact_match": {
+      "passed": 0,
+      "denominator": 50,
+      "rate": 0.0
+    },
+    "ast_match": {
+      "passed": 4,
+      "denominator": 50,
+      "rate": 0.08
+    },
+    "compile_pass": {
+      "passed": 42,
+      "denominator": 50,
+      "rate": 0.84
+    },
+    "marker_free": {
+      "passed": 49,
+      "denominator": 50,
+      "rate": 0.98
+    },
+    "reference_compile_failures": 0,
+    "mean_latency_seconds": 12.793357740801293,
+    "latency_record_count": 50
+  },
+  "by_difficulty": {
+    "easy": {
+      "total": 24,
+      "statuses": {
+        "ok": 24
+      },
+      "exact_match": {
+        "passed": 0,
+        "denominator": 24,
+        "rate": 0.0
+      },
+      "ast_match": {
+        "passed": 2,
+        "denominator": 24,
+        "rate": 0.08333333333333333
+      },
+      "compile_pass": {
+        "passed": 21,
+        "denominator": 24,
+        "rate": 0.875
+      },
+      "marker_free": {
+        "passed": 23,
+        "denominator": 24,
+        "rate": 0.9583333333333334
+      },
+      "reference_compile_failures": 0,
+      "mean_latency_seconds": 11.809803644083635,
+      "latency_record_count": 24
+    },
+    "hard": {
+      "total": 25,
+      "statuses": {
+        "ok": 25
+      },
+      "exact_match": {
+        "passed": 0,
+        "denominator": 25,
+        "rate": 0.0
+      },
+      "ast_match": {
+        "passed": 2,
+        "denominator": 25,
+        "rate": 0.08
+      },
+      "compile_pass": {
+        "passed": 20,
+        "denominator": 25,
+        "rate": 0.8
+      },
+      "marker_free": {
+        "passed": 25,
+        "denominator": 25,
+        "rate": 1.0
+      },
+      "reference_compile_failures": 0,
+      "mean_latency_seconds": 13.124306431640871,
+      "latency_record_count": 25
+    },
+    "medium": {
+      "total": 1,
+      "statuses": {
+        "ok": 1
+      },
+      "exact_match": {
+        "passed": 0,
+        "denominator": 1,
+        "rate": 0.0
+      },
+      "ast_match": {
+        "passed": 0,
+        "denominator": 1,
+        "rate": 0.0
+      },
+      "compile_pass": {
+        "passed": 1,
+        "denominator": 1,
+        "rate": 1.0
+      },
+      "marker_free": {
+        "passed": 1,
+        "denominator": 1,
+        "rate": 1.0
+      },
+      "reference_compile_failures": 0,
+      "mean_latency_seconds": 28.124938791035675,
+      "latency_record_count": 1
+    }
+  },
+  "inputs_sha256": "62276295d6fb24904cdcbfae131b1ae7f237302b17ee20da7afee5afa55b154e",
+  "references_sha256": "1df181e134bc26f6fd98d986673eade2f0d3597bc4a7e5eb56e00747cbeb1443",
+  "predictions_sha256": "ac2efd627b45b443f01d91a61b4286ef0e0cab87289b9027fddb41092013b484",
+  "manifest_sha256": "d383cbc63a411add1f00645ecc35c68e85f89f9cbd169d42d19fcbd6f2ff5727",
+  "python": "3.12.3",
+  "split": "dev",
+  "policy": "All selected cases in denominators, including missing/errors/abstentions. Exact match normalizes line endings only. Invalid references flagged, never silently excluded. AST match is not behavioral equivalence."
+}
