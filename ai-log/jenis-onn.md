@@ -97,7 +97,7 @@ Help updating tests/test_evaluation.py to cover the changes made to evaluation.p
 I ran `python -m pytest tests -v` and all 200 tests passed (67 of them in test_commit_retrieval.py). I read through the new test cases and checked that the expected results match how retrieved_context mode, the retries and the commit selection should behave. Used a different model as what was used to generate the actual scripts.
 
 ### What I kept or changed
-I kept the updated test_evaluation.py and the new test_commit_retrieval.py. [EDIT: list any changes you made, or write "without making any edits".]
+I kept the updated test_evaluation.py and the new test_commit_retrieval.py.
 
 ## 2026-10-30 · Surrounding code and commit context for the CLI
 - **Tool (model):** Claude Code (Claude Opus 5.5)
@@ -112,4 +112,18 @@ I printed the context for examples/sample_conflict.py and checked that it showed
 
 ### What I kept or changed
 I kept context_retrieval.py after fixes. The other changes were kept, manually inputting them into the files.
+
+## 2026-10-31 · Unit tests for context_retrieval
+- **Tool (model):** Claude (Sonnet 5.5)
+- **Files:** tests/test_context_retrieval.py (new)
+- **Outcome:** Kept
+
+### What I asked for
+Help writing unit tests for the new src/context_retrieval.py, which builds the context sent to the model: the surrounding code around a conflict, and the commits that touched the conflicted lines on each side of a merge.
+
+### How I checked it
+I ran `python -m pytest tests/test_context_retrieval.py -v` and all tests passed. I read through the new test cases and checked that the expected results match how the surrounding code, the line ranges for each side of a conflict, and the commit lookup should behave. The commit tests build small temporary git repos with a real merge conflict, so they exercise the actual git commands rather than mocks. The tests are written by a different model from the one that generated context_retrieval.py
+
+### What I kept or changed
+I kept the new test_context_retrieval.py.
 
