@@ -12,6 +12,8 @@ import re
 import sys
 import time
 
+from src.baselines import BASELINE_MODES, RATIONALE, resolve_baseline
+
 VERSION = '1.0'
 
 
@@ -115,16 +117,25 @@ def generate(a):
         raise ValueError('Selected IDs missing from inputs')
     output = Path(a.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Settings bind resume to the same data, partition, mode and client source.
-    sys.path.insert(0, str(Path.cwd()))
-    client = importlib.import_module(a.client)
-    config = dict(version=VERSION, inputs_sha256=digest(a.inputs),
-                  manifest_sha256=digest(a.manifest), split=a.split, mode=a.mode,
-                  client=a.client, client_sha256=digest(client.__file__),
-                  model=getattr(client, 'OLLAMA_MODEL', None),
-                  base_url=getattr(client, 'OLLAMA_BASE_URL', None), timeout=a.timeout,
-                  python=platform.python_version(),
-                  note='Generation settings are inherited from client; current supplied client does not fix seed/temperature or report truncation.')
+    baseline = a.mode in BASELINE_MODES
+    if baseline:
+        # No model is involved, so resume is not tied to the Ollama client.
+        client = None
+        config = dict(version=VERSION, inputs_sha256=digest(a.inputs),
+                      manifest_sha256=digest(a.manifest), split=a.split, mode=a.mode,
+                      python=platform.python_version(),
+                      note='Git merge-file baseline applied to each conflict hunk. No model is called.')
+    else:
+        # Settings bind resume to the same data, partition, mode and client source.
+        sys.path.insert(0, str(Path.cwd()))
+        client = importlib.import_module(a.client)
+        config = dict(version=VERSION, inputs_sha256=digest(a.inputs),
+                      manifest_sha256=digest(a.manifest), split=a.split, mode=a.mode,
+                      client=a.client, client_sha256=digest(client.__file__),
+                      model=getattr(client, 'OLLAMA_MODEL', None),
+                      base_url=getattr(client, 'OLLAMA_BASE_URL', None), timeout=a.timeout,
+                      python=platform.python_version(),
+                      note='Generation settings are inherited from client; current supplied client does not fix seed/temperature or report truncation.')
     meta = Path(str(output) + '.meta.json')
     done = {}
     if output.exists():
@@ -142,33 +153,44 @@ def generate(a):
             if key in done:
                 continue
             x = inputs[key]
-            context = ''
-            if a.mode == 'commit_context':
-                context = 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
-            # Retry so a brief server stall does not fail the case outright.
-            retries = getattr(a, 'retries', 0)
-            for attempt in range(1, retries + 2):
-                row = dict(case_id=key, method=a.mode, status='error', attempts=attempt)
+            if baseline:
+                # An empty side is a real git result, for example when that side deleted the lines.
+                row = dict(case_id=key, method=a.mode, status='error', attempts=1)
                 start = time.monotonic()
                 try:
-                    answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
-                    if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
-                        raise ValueError('Client returned no nonempty string resolution')
-                    row.update(status='ok', resolution=answer['resolution'],
-                               rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
-                               done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'),
-                               repair_attempted=answer.get('repair_attempted', False),
-                               initial_resolution=answer.get('initial_resolution'),
-                               initial_syntax_error=answer.get('initial_syntax_error', ''),
-                               repair_error=answer.get('repair_error', ''))
+                    row.update(status='ok', resolution=resolve_baseline(x['conflict_code'], a.mode),
+                               rationale=RATIONALE[a.mode], assumptions='')
                 except Exception as exc:
                     row['error'] = f'{type(exc).__name__}: {exc}'
                 row['latency_seconds'] = time.monotonic() - start
-                if row['status'] == 'ok' or attempt > retries:
-                    break
-                wait = getattr(a, 'retry_wait', 0) * attempt
-                print(f'{i}/{len(ids)} attempt {attempt} failed, retrying in {wait}s: {row["error"]}', flush=True)
-                time.sleep(wait)
+            else:
+                context = ''
+                if a.mode == 'commit_context':
+                    context = 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
+                # Retry so a brief server stall does not fail the case outright.
+                retries = getattr(a, 'retries', 0)
+                for attempt in range(1, retries + 2):
+                    row = dict(case_id=key, method=a.mode, status='error', attempts=attempt)
+                    start = time.monotonic()
+                    try:
+                        answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
+                        if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
+                            raise ValueError('Client returned no nonempty string resolution')
+                        row.update(status='ok', resolution=answer['resolution'],
+                                   rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
+                                   done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'),
+                                   repair_attempted=answer.get('repair_attempted', False),
+                                   initial_resolution=answer.get('initial_resolution'),
+                                   initial_syntax_error=answer.get('initial_syntax_error', ''),
+                                   repair_error=answer.get('repair_error', ''))
+                    except Exception as exc:
+                        row['error'] = f'{type(exc).__name__}: {exc}'
+                    row['latency_seconds'] = time.monotonic() - start
+                    if row['status'] == 'ok' or attempt > retries:
+                        break
+                    wait = getattr(a, 'retry_wait', 0) * attempt
+                    print(f'{i}/{len(ids)} attempt {attempt} failed, retrying in {wait}s: {row["error"]}', flush=True)
+                    time.sleep(wait)
             f.write(json.dumps(row, ensure_ascii=False) + '\n')
             f.flush()
             print(f'{i}/{len(ids)} {row["status"]} {key}', flush=True)
@@ -289,7 +311,8 @@ def main():
         p.add_argument('--split', choices=['smoke', 'dev', 'test', 'unseen'], default='smoke')
         if command == 'generate':
             p.add_argument('--client', default='src.resolver.ollama_client')
-            p.add_argument('--mode', choices=['conflict_only', 'commit_context'], default='conflict_only')
+            p.add_argument('--mode', choices=['conflict_only', 'commit_context', *BASELINE_MODES], default='conflict_only',
+                           help='conflict_only and commit_context call the model; ours, theirs and union are git baselines')
             p.add_argument('--output', required=True)
             p.add_argument('--timeout', type=int, default=300)
             p.add_argument('--resume', action='store_true')
