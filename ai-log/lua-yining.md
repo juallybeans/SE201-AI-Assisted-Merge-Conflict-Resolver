@@ -30,3 +30,19 @@ Verified that the Ollama API endpoint returned the available model list through 
 ### What I kept or changed
 Documented the steps for starting the cluster-hosted Ollama server, recording the compute node and port, creating the SSH tunnel, configuring OLLAMA_BASE_URL and OLLAMA_MODEL, and running the connection and generation tests. Simplified the setup guide to focus on the essential steps required by teammates.
 
+
+## 2026-10-29 · Syntax repair attempt
+
+- **Tool (model):** Claude Code (Opus 5.5)
+- **Files:** src/resolver/ollama_client.py, tests/test_ollama_client.py, src/evaluation.py, src/cli.py, examples/repair_conflict.py, README.md
+- **Outcome:** Changed
+
+### What I asked for
+Implement the "context retrieval and repair" checkpoint from the proposal: when the model's proposed resolution fails the syntax check, make a single repair attempt that gives the model the error as feedback so it can return a resolution that passes. Make the change testable, add example conflicts for trying the repair through the CLI, and update the README with the test steps.
+
+### How I checked it
+I locally ran the new unit tests which replace Ollama with a fake model, and all tests passed. Then, I connected to the Ollama model on the GPU cluster through the SSH tunnel and tested the change end to end. All of these worked as intended on the cluster model.
+
+### What I kept or changed
+Kept the changes made by the AI, and added some edits to the README to make it easier to follow.
+

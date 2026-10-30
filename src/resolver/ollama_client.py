@@ -1,6 +1,8 @@
 
 import json
 import os
+import re
+import textwrap
 
 import requests
 from dotenv import load_dotenv
@@ -18,66 +20,53 @@ OLLAMA_MODEL = os.getenv(
     "qwen2.5-coder:7b",
 )
 
+CONFLICT_MARKERS = re.compile(
+    r"^(?:<{7,}(?: .*)?|={7,}|>{7,}(?: .*)?|\|{7,}(?: .*)?)$",
+    re.MULTILINE,
+)
+
+RESPONSE_REQUIREMENTS = """
+Return valid JSON with exactly these fields:
+{
+  "resolution": "The complete resolved code as a string",
+  "explanation": "Explain what was retained, combined, or changed",
+  "assumptions": "Describe uncertainties and possible risks"
+}
+
+The resolution field must contain code only, without Markdown fences.
+"""
+
 
 class OllamaResolverError(RuntimeError):
     """Raised when Ollama cannot generate a resolution."""
 
 
-def resolve_conflict(
-    conflict: str,
-    context: str = "",
-    timeout: int = 300,
-) -> dict:
+def check_syntax(code: str) -> str:
     """
-    Generate a proposed merge resolution.
+    Check a proposed resolution for leftover conflict markers and
+    Python syntax errors.
 
-    Args:
-        conflict: The conflicting Git code, including markers.
-        context: Optional surrounding code and branch-specific
-                 commit messages.
-        timeout: Maximum seconds to wait for Ollama.
-
-    Returns:
-        A dictionary containing:
-        - resolution: proposed merged code
-        - explanation: explanation of the changes
-        - assumptions: assumptions or unresolved risks
+    Returns an empty string when the code passes, otherwise a short
+    description of the first problem found.
     """
-    if not conflict.strip():
-        raise ValueError("Conflict content cannot be empty.")
+    match = CONFLICT_MARKERS.search(code)
+    if match:
+        line = code.count("\n", 0, match.start()) + 1
+        return f"Conflict marker remains on line {line}: {match.group(0)}"
 
-    prompt = f"""
-You are an expert software engineer assisting with Git merges.
+    try:
+        compile(textwrap.dedent(code), "<resolution>", "exec",
+                dont_inherit=True)
+    except SyntaxError as exc:
+        return f"SyntaxError on line {exc.lineno}: {exc.msg}"
+    except (ValueError, TypeError, RecursionError) as exc:
+        return f"{type(exc).__name__}: {exc}"
 
-Resolve the supplied merge conflict conservatively.
+    return ""
 
-Requirements:
-1. Understand both the current and incoming changes.
-2. Preserve the intended functionality of both sides when
-   they are compatible.
-3. Do not invent requirements unsupported by the context.
-4. Remove all Git conflict markers from the proposed code.
-5. If the changes are incompatible or the intent is unclear,
-   explain the uncertainty instead of silently discarding a change.
-6. Do not claim that the resolution passes tests unless tests
-   have actually been run.
 
-Repository context and relevant commit messages:
-{context or "(No additional context provided)"}
-
-Conflicting code:
-{conflict}
-
-Return valid JSON with exactly these fields:
-{{
-  "resolution": "The complete resolved code as a string",
-  "explanation": "Explain what was retained, combined, or changed",
-  "assumptions": "Describe uncertainties and possible risks"
-}}
-
-The resolution field must contain code only, without Markdown fences.
-"""
-
+def _generate(prompt: str, timeout: int) -> dict:
+    """Send one prompt to Ollama and return the parsed JSON reply."""
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
@@ -183,3 +172,138 @@ The resolution field must contain code only, without Markdown fences.
         raise OllamaResolverError(
             f"Could not parse Ollama's JSON response: {exc}"
         ) from exc
+
+
+def repair_resolution(
+    conflict: str,
+    context: str,
+    previous_resolution: str,
+    syntax_error: str,
+    timeout: int = 300,
+) -> dict:
+    """
+    Ask the model to fix a resolution that failed the syntax check.
+
+    The prompt includes the original conflict, the failed resolution
+    and the error message so the model can correct only what is broken.
+    Returns the same fields as resolve_conflict's model reply.
+    """
+    prompt = f"""
+You are an expert software engineer assisting with Git merges.
+
+Your previous resolution of this merge conflict failed the syntax
+check. Fix the error and return a corrected resolution.
+
+Requirements:
+1. Fix the reported error and any other syntax problems.
+2. Keep the merge decisions of the previous resolution unless they
+   caused the error; do not discard either side's changes.
+3. Remove all Git conflict markers from the proposed code.
+4. Do not invent requirements unsupported by the context.
+
+Repository context and relevant commit messages:
+{context or "(No additional context provided)"}
+
+Original conflicting code:
+{conflict}
+
+Previous resolution (failed the syntax check):
+{previous_resolution}
+
+Syntax check error:
+{syntax_error}
+{RESPONSE_REQUIREMENTS}"""
+
+    return _generate(prompt, timeout)
+
+
+def resolve_conflict(
+    conflict: str,
+    context: str = "",
+    timeout: int = 300,
+    repair: bool = True,
+) -> dict:
+    """
+    Generate a proposed merge resolution.
+
+    If the first resolution fails the syntax check, one repair attempt
+    is made using the error as feedback.
+
+    Args:
+        conflict: The conflicting Git code, including markers.
+        context: Optional surrounding code and branch-specific
+                 commit messages.
+        timeout: Maximum seconds to wait for each Ollama request.
+        repair: Whether to make one repair attempt when the first
+                resolution fails the syntax check.
+
+    Returns:
+        A dictionary containing:
+        - resolution: proposed merged code (repaired, if a repair
+          attempt produced one)
+        - explanation: explanation of the changes
+        - assumptions: assumptions or unresolved risks
+        - syntax_error: error for the returned resolution, or ""
+        - repair_attempted: whether a repair request was sent
+        - initial_resolution: the first resolution, before repair
+        - initial_syntax_error: error for the first resolution, or ""
+        - repair_error: why the repair request failed, or ""
+    """
+    if not conflict.strip():
+        raise ValueError("Conflict content cannot be empty.")
+
+    prompt = f"""
+You are an expert software engineer assisting with Git merges.
+
+Resolve the supplied merge conflict conservatively.
+
+Requirements:
+1. Understand both the current and incoming changes.
+2. Preserve the intended functionality of both sides when
+   they are compatible.
+3. Do not invent requirements unsupported by the context.
+4. Remove all Git conflict markers from the proposed code.
+5. If the changes are incompatible or the intent is unclear,
+   explain the uncertainty instead of silently discarding a change.
+6. Do not claim that the resolution passes tests unless tests
+   have actually been run.
+
+Repository context and relevant commit messages:
+{context or "(No additional context provided)"}
+
+Conflicting code:
+{conflict}
+{RESPONSE_REQUIREMENTS}"""
+
+    result = _generate(prompt, timeout)
+    error = check_syntax(result["resolution"])
+    result.update(
+        syntax_error=error,
+        repair_attempted=False,
+        initial_resolution=result["resolution"],
+        initial_syntax_error=error,
+        repair_error="",
+    )
+
+    if not error or not repair:
+        return result
+
+    result["repair_attempted"] = True
+    try:
+        repaired = repair_resolution(
+            conflict, context, result["resolution"], error, timeout,
+        )
+    except OllamaResolverError as exc:
+        # Keep the first resolution rather than losing the case.
+        result["repair_error"] = str(exc)
+        return result
+
+    result.update(
+        resolution=repaired["resolution"],
+        explanation=repaired["explanation"],
+        assumptions=repaired["assumptions"],
+        done_reason=repaired["done_reason"],
+        eval_count=repaired["eval_count"],
+        syntax_error=check_syntax(repaired["resolution"]),
+    )
+    return result
