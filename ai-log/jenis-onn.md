@@ -23,7 +23,7 @@ I kept the AI-generated evaluation.py code without making any edits.
 Help writing unit tests for evaluation.py to check that the evaluation logic behaves as expected.
 
 ### How I checked it
-I ran the tests against evaluation.py and they passed. I reviewed the test cases and checked that their expected results match how the evaluation logic should behave.
+I ran the tests against evaluation.py and they passed. I reviewed the test cases and checked that their expected results match how the evaluation logic should behave. Used a different model as what was used to generate the actual scripts.
 
 ### What I kept or changed
 I kept the AI-generated test_evaluation.py code without making any edits.
@@ -69,5 +69,34 @@ The saved results showed that after about 25 cases, every request waited the ful
 
 ### What I kept or changed
 I changed the notebook to write Ollama's output to a log file. I added retries for failed cases, let a missing explanation or assumptions field pass instead of failing the case, and raised the output cap to 4096 tokens. Claude wrote the code changes; I reviewed them and applied them myself.
+
+
+## 2026-10-30 · Relevance-filtered commit context (retrieved_context mode)
+- **Tool (model):** Claude Code (Claude Opus 5.5)
+- **Files:** src/commit_retrieval.py (new), src/evaluation.py
+- **Outcome:** Kept
+
+### What I asked for
+A detailed how-to for : instead of sending every commit message to the model, keep only the ones related to the conflict, as a new evaluation mode to compare against conflict_only and commit_context.
+
+### How I checked it
+I applied the edits myself, ran the unit tests again, and ran the 50 dev cases with --mode retrieved_context, then scored them against the conflict_only and commit_context runs. [RESULT: e.g. all 50 cases ok]
+
+### What I kept or changed
+I kept the word-overlap scoring (messages ranked by how many words they share with the conflict code, merge and README-only messages dropped, top 3 per branch).
+
+## 2026-10-30 · Unit tests for the new evaluation features and commit retrieval
+- **Tool (model):** Claude (Sonnet 5.5)
+- **Files:** tests/test_evaluation.py (updated), tests/test_commit_retrieval.py (new)
+- **Outcome:** Kept
+
+### What I asked for
+Help updating tests/test_evaluation.py to cover the changes made to evaluation.py (retrieved_context mode, --top-k, retries, and the extra settings saved with each run), and writing unit tests for the new src/commit_retrieval.py, plus how to run them.
+
+### How I checked it
+I ran `python -m pytest tests -v` and all 200 tests passed (67 of them in test_commit_retrieval.py). I read through the new test cases and checked that the expected results match how retrieved_context mode, the retries and the commit selection should behave. Used a different model as what was used to generate the actual scripts.
+
+### What I kept or changed
+I kept the updated test_evaluation.py and the new test_commit_retrieval.py. [EDIT: list any changes you made, or write "without making any edits".]
 
 
