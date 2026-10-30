@@ -230,4 +230,29 @@ python -m src.evaluation score --manifest evaluation/cases_short4000_context4000
 
 Compare the two `summary.json` files to see whether commit context changes the scores.
 
+### 13. Git baselines (ours, theirs, union)
+
+These three modes do not call the model. They resolve each conflict the way `git merge-file --ours`, `--theirs` and `--union` would:
+
+| Mode | What it keeps |
+|---|---|
+| `ours` | The current side of each conflict (`<<<<<<< HEAD`, the first parent) |
+| `theirs` | The incoming side of each conflict (the second parent) |
+| `union` | Both sides, current side first |
+
+Code outside the conflict markers is left as it is. No SSH tunnel is required. Use the same manifest and split for `generate` and `score`.
+
+```bash
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode ours --output results/baselines/short4000_dev_ours.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_ours.jsonl --out-dir results/baselines/short4000_dev_ours_scores
+
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode theirs --output results/baselines/short4000_dev_theirs.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_theirs.jsonl --out-dir results/baselines/short4000_dev_theirs_scores
+
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode union --output results/baselines/short4000_dev_union.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_union.jsonl --out-dir results/baselines/short4000_dev_union_scores
+```
+
+Replace `--split dev` with `smoke` or `test` to score another partition. Compare each `summary.json` with the model runs on the same split. A file with an unclosed conflict, or a conflict that has no `=======` separator, is saved as an error and counts as a failure. Markers left inside one side by an earlier merge stay in that side.
+
 ---
