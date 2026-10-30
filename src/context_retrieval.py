@@ -119,7 +119,8 @@ def commits_for(root, path, line_range, rev_range, limit=10):
 
 
 def conflict_commits(file_path: str, text: str, conflict: dict, top_k: int = 3) -> dict:
-    folder = os.path.dirname(os.path.abspath(file_path))
+    file_abs = os.path.abspath(file_path)
+    folder = os.path.realpath(os.path.dirname(file_abs))
     root = git(["rev-parse", "--show-toplevel"], folder).strip()
     if not root:
         return {}
@@ -127,7 +128,7 @@ def conflict_commits(file_path: str, text: str, conflict: dict, top_k: int = 3) 
     if not incoming:
         return {}                     # not in a merge (rebase/cherry-pick not handled)
     base = git(["merge-base", "HEAD", incoming], root).strip()
-    path = os.path.relpath(os.path.abspath(file_path), root)
+    path = os.path.relpath(os.path.join(folder, os.path.basename(file_abs)), root)
     ours, theirs = side_ranges(text, conflict["start_line"])
     messages = {
         "current (HEAD)": commits_for(root, path, ours, f"{base}..HEAD"),

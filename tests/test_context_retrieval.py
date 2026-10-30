@@ -428,6 +428,23 @@ class TestConflictCommits:
         text = SIMPLE  # no merge, so the text is irrelevant
         assert ctx.conflict_commits(str(app), text, locate(text)) == {}
 
+    def test_works_through_a_symlinked_folder(self, tmp_path):
+        repo, app = make_repo(tmp_path)
+        link = tmp_path / 'link'
+        link.symlink_to(repo, target_is_directory=True)
+        text = app.read_text()
+        conflict = locate(text)
+        through_link = ctx.conflict_commits(str(link / 'app.py'), text, conflict)
+        assert through_link == ctx.conflict_commits(str(app), text, conflict)
+        assert all(through_link.values())  # both sides found commits
+
+    def test_works_with_a_relative_path(self, tmp_path, monkeypatch):
+        repo, app = make_repo(tmp_path)
+        text = app.read_text()
+        monkeypatch.chdir(repo)
+        result = ctx.conflict_commits('app.py', text, locate(text))
+        assert all(result.values())
+
 
 # --------------------------------------------------------------------------
 # get_context

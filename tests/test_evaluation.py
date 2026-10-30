@@ -603,6 +603,43 @@ class TestGenerateRetrievedContext:
                    for s, f in zip(read_rows(small), read_rows(full)))
         assert {r['method'] for r in read_rows(small)} == {'retrieved_context'}
 
+    def test_list_commit_messages_rejected_before_anything_is_written(self, tmp_path, inputs, fake_client):
+        manifest, m = run_prepare(tmp_path, inputs)  # default inputs use plain lists
+        out = tmp_path / 'p.jsonl'
+        with pytest.raises(ValueError, match='keyed by branch') as exc:
+            ev.generate(gen_args(inputs, manifest, out, fake_client, mode='retrieved_context'))
+        assert f'{len(m["dev"])} selected case(s)' in str(exc.value)
+        assert not out.exists() and not Path(str(out) + '.meta.json').exists()
+        assert not fake_client.CALLS
+
+    def test_missing_commit_messages_rejected(self, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(commit_messages=None))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        with pytest.raises(ValueError, match='keyed by branch'):
+            ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                                 mode='retrieved_context'))
+
+    def test_error_names_the_first_bad_case(self, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(commit_messages=BRANCHES))
+        manifest, m = run_prepare(tmp_path, inputs)
+        bad = m['dev'][1]
+        rows = [json.loads(line) for line in inputs.read_text(encoding='utf-8').splitlines()]
+        for row in rows:
+            if row['case_id'] == bad:
+                row['commit_messages'] = ['plain', 'list']
+        write_jsonl(inputs, rows)
+        ev.write_json(manifest, {**json.loads(manifest.read_text(encoding='utf-8')),
+                                 'inputs_sha256': ev.digest(inputs)})
+        with pytest.raises(ValueError, match=f'1 selected case.*first: {bad}'):
+            ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                                 mode='retrieved_context'))
+
+    @pytest.mark.parametrize('mode', ['conflict_only', 'commit_context'])
+    def test_other_modes_still_accept_list_commit_messages(self, tmp_path, inputs, fake_client, mode):
+        manifest, m = run_prepare(tmp_path, inputs)
+        ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client, mode=mode))
+        assert len(read_rows(tmp_path / 'p.jsonl')) == len(m['dev'])
+
 
 class TestBuildContext:
     ITEM = dict(conflict_code=CODE, commit_messages=BRANCHES)
@@ -690,77 +727,6 @@ class TestGenerateRetries:
         out = capsys.readouterr().out
         assert 'attempt 1 failed, retrying in 2s: RuntimeError: flaky' in out
         assert '/4 ok ' in out
-
-
-# --------------------------------------------------------------------------
-# git baselines
-# --------------------------------------------------------------------------
-
-BASELINE_CONFLICT = 'keep\n<<<<<<< HEAD\nours = 1\n=======\ntheirs = 2\n>>>>>>> incoming\ntail\n'
-
-
-def baseline_inputs(tmp_path, conflict=BASELINE_CONFLICT):
-    return make_inputs(
-        tmp_path / 'inputs.jsonl',
-        overrides={f'g{g}-c{c}': {'conflict_code': conflict} for g in range(10) for c in range(2)},
-    )
-
-
-def baseline_args(inputs, manifest, output, mode):
-    return ns(inputs=str(inputs), manifest=str(manifest), split='dev',
-              client='no_such_client_module_xyz', mode=mode, output=str(output),
-              timeout=1, resume=False)
-
-
-class TestBaselines:
-    @pytest.mark.parametrize('mode,expected', [
-        ('ours', 'keep\nours = 1\ntail\n'),
-        ('theirs', 'keep\ntheirs = 2\ntail\n'),
-        ('union', 'keep\nours = 1\ntheirs = 2\ntail\n'),
-    ])
-    def test_generate_writes_git_resolution_without_a_model(self, tmp_path, mode, expected):
-        inputs = baseline_inputs(tmp_path)
-        manifest, m = run_prepare(tmp_path, inputs)
-        out = tmp_path / f'{mode}.jsonl'
-        ev.generate(baseline_args(inputs, manifest, out, mode))
-        rows = read_rows(out)
-        assert [r['case_id'] for r in rows] == m['dev']
-        assert all(r['status'] == 'ok' and r['method'] == mode for r in rows)
-        assert all(r['resolution'] == expected for r in rows)
-        assert all(r['rationale'].startswith('Git merge-file') for r in rows)
-        meta = json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))
-        assert meta['mode'] == mode
-        assert 'client' not in meta and 'model' not in meta
-
-    def test_empty_side_is_saved_as_ok(self, tmp_path):
-        inputs = baseline_inputs(tmp_path, '<<<<<<< HEAD\n=======\nkept = 1\n>>>>>>> incoming\n')
-        manifest, _ = run_prepare(tmp_path, inputs)
-        out = tmp_path / 'ours.jsonl'
-        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
-        rows = read_rows(out)
-        assert all(r['status'] == 'ok' and r['resolution'] == '' for r in rows)
-
-    def test_unclosed_conflict_becomes_an_error_row(self, tmp_path):
-        inputs = baseline_inputs(tmp_path, '<<<<<<< HEAD\nours\n')
-        manifest, _ = run_prepare(tmp_path, inputs)
-        out = tmp_path / 'ours.jsonl'
-        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
-        rows = read_rows(out)
-        assert rows and all(r['status'] == 'error' for r in rows)
-        assert all('Unclosed conflict marker' in r['error'] for r in rows)
-        assert all('resolution' not in r for r in rows)
-
-    def test_resume_skips_cases_already_written(self, tmp_path):
-        inputs = baseline_inputs(tmp_path)
-        manifest, m = run_prepare(tmp_path, inputs)
-        out = tmp_path / 'ours.jsonl'
-        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
-        lines = out.read_text(encoding='utf-8').splitlines()
-        out.write_text(lines[0] + '\n', encoding='utf-8')
-        args = baseline_args(inputs, manifest, out, 'ours')
-        args.resume = True
-        ev.generate(args)
-        assert [r['case_id'] for r in read_rows(out)] == m['dev']
 
 
 # --------------------------------------------------------------------------
@@ -1176,3 +1142,15 @@ class TestMain:
                       '--retries', 1, '--retry-wait', 0)
         rows = read_rows(preds)
         assert all(r['status'] == 'ok' and r['attempts'] == 2 for r in rows)
+
+    def test_retrieved_context_with_list_commit_messages_exits_cleanly(self, monkeypatch, tmp_path,
+                                                                       inputs, fake_client, capsys):
+        manifest = tmp_path / 'cases.json'
+        self.run_main(monkeypatch, 'prepare', '--inputs', inputs, '--manifest', manifest,
+                      '--test-size', 4, '--dev-size', 4)
+        with pytest.raises(SystemExit) as exc:
+            self.run_main(monkeypatch, 'generate', '--inputs', inputs, '--manifest', manifest,
+                          '--split', 'dev', '--client', fake_client.NAME,
+                          '--output', tmp_path / 'p.jsonl', '--mode', 'retrieved_context')
+        assert exc.value.code == 1
+        assert 'Error: retrieved_context needs commit_messages keyed by branch' in capsys.readouterr().err

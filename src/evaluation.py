@@ -123,6 +123,11 @@ def generate(a):
     inputs = {x['case_id']: x for x in records(a.inputs) if x['case_id'] in selected_ids}
     if set(inputs) != selected_ids:
         raise ValueError('Selected IDs missing from inputs')
+    if a.mode == 'retrieved_context':                     
+        bad = [key for key, x in inputs.items() if not isinstance(x.get('commit_messages'), dict)]
+        if bad:
+            raise ValueError(f'retrieved_context needs commit_messages keyed by branch (a dict); '
+                             f'{len(bad)} selected case(s) have something else, first: {bad[0]}')
     output = Path(a.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     baseline = a.mode in BASELINE_MODES
