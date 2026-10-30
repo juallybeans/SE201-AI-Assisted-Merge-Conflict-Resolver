@@ -1,13 +1,8 @@
-"""Tests for src/evaluation.py.
-
-Place at tests/test_evaluation.py and run from the repository root:
-
-    python -m pytest tests/test_evaluation.py -v
-"""
 import argparse
 import csv
 import hashlib
 import json
+import platform
 import sys
 import uuid
 from pathlib import Path
@@ -74,15 +69,22 @@ OLLAMA_MODEL = "fake-model"
 OLLAMA_BASE_URL = "http://localhost:0"
 
 
+ATTEMPTS = {}
+
+
 def resolve_conflict(conflict, context, timeout):
     CALLS.append(dict(conflict=conflict, context=context, timeout=timeout))
+    ATTEMPTS[conflict] = ATTEMPTS.get(conflict, 0) + 1
     if "FAIL" in conflict:
         raise RuntimeError("boom")
+    if "FLAKY" in conflict and ATTEMPTS[conflict] < 2:
+        raise RuntimeError("flaky")
     if "EMPTY" in conflict:
         return {"resolution": "   "}
     if "NOTDICT" in conflict:
         return "just a string"
-    return {"resolution": "resolved = 1\\n", "explanation": "because", "assumptions": "none"}
+    return {"resolution": "resolved = 1\\n", "explanation": "because", "assumptions": "none",
+            "done_reason": "stop", "eval_count": 7}
 '''
 
 
@@ -102,9 +104,34 @@ def fake_client(tmp_path, monkeypatch):
 
 
 def gen_args(inputs, manifest, output, client, split='dev', mode='conflict_only',
-             timeout=300, resume=False):
+             timeout=300, resume=False, top_k=3, retries=0, retry_wait=0):
     return ns(inputs=str(inputs), manifest=str(manifest), split=split, client=client.NAME,
-              mode=mode, output=str(output), timeout=timeout, resume=resume)
+              mode=mode, output=str(output), timeout=timeout, resume=resume,
+              top_k=top_k, retries=retries, retry_wait=retry_wait)
+
+
+def all_cases(**fields):
+    """Overrides for make_inputs applying the same fields to every case.
+
+    String values may contain '{key}', which is replaced by the case id.
+    """
+    return {f'g{g}-c{c}': {name: value.format(key=f'g{g}-c{c}') if isinstance(value, str) else value
+                           for name, value in fields.items()}
+            for g in range(10) for c in range(2)}
+
+
+# Commit messages keyed by branch, as retrieved_context mode expects.
+BRANCHES = {
+    'ours': ['Merge branch main', 'add parse_config validation', 'fix typo in readme',
+             'refactor load_settings cache', 'update docs'],
+    'theirs': ['wip', 'rename helper'],
+}
+CODE = 'def parse_config():\n    return load_settings()\n'
+
+
+def context_payload(context):
+    """The JSON part of a retrieved_context prompt."""
+    return json.loads(context.split('\n', 1)[1])
 
 
 # --------------------------------------------------------------------------
@@ -479,6 +506,191 @@ class TestGenerate:
         with pytest.raises(ImportError):
             ev.generate(args)
 
+    def test_rows_record_attempts_context_size_and_generation_info(self, tmp_path, inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, mode='commit_context'))
+        for r in read_rows(out):
+            assert r['attempts'] == 1
+            assert r['context_chars'] == len(fake_client.CALLS[0]['context'])
+            assert r['done_reason'] == 'stop'
+            assert r['eval_count'] == 7
+
+    def test_metadata_binds_run_settings(self, tmp_path, fake_client):
+        # retrieved_context needs commit_messages keyed by branch (a dict), not a plain list.
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(commit_messages=BRANCHES))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, mode='retrieved_context', top_k=2))
+        meta = json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))
+        assert meta['mode'] == 'retrieved_context'
+        assert meta['top_k'] == 2
+        assert meta['client'] == fake_client.NAME
+        assert meta['client_sha256'] == ev.digest(fake_client.__file__)
+        assert meta['timeout'] == 300
+        assert meta['version'] == ev.VERSION
+        assert meta['python'] == platform.python_version()
+
+    @pytest.mark.parametrize('change', [dict(top_k=5), dict(mode='commit_context')])
+    def test_resume_with_changed_top_k_or_mode_raises(self, tmp_path, inputs, fake_client, change):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client))
+        with pytest.raises(ValueError, match='Resume settings differ'):
+            ev.generate(gen_args(inputs, manifest, out, fake_client, resume=True, **change))
+
+    def test_resume_with_edited_client_source_raises(self, tmp_path, inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client))
+        with open(fake_client.__file__, 'a', encoding='utf-8') as f:
+            f.write('\n# edited after the first run\n')
+        with pytest.raises(ValueError, match='Resume settings differ'):
+            ev.generate(gen_args(inputs, manifest, out, fake_client, resume=True))
+
+    def test_resume_with_same_settings_keeps_existing_rows(self, tmp_path, inputs, fake_client):
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, top_k=2))
+        before = out.read_text(encoding='utf-8')
+        fake_client.CALLS.clear()
+        ev.generate(gen_args(inputs, manifest, out, fake_client, top_k=2, resume=True))
+        assert not fake_client.CALLS
+        assert out.read_text(encoding='utf-8') == before
+
+    def test_generates_the_unseen_split(self, tmp_path, inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        with_unseen = tmp_path / 'with_unseen.json'
+        ev.reserve(ns(inputs=str(inputs), manifest=str(manifest), output_manifest=str(with_unseen)))
+        unseen = json.loads(with_unseen.read_text(encoding='utf-8'))['unseen']
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, with_unseen, out, fake_client, split='unseen'))
+        assert [r['case_id'] for r in read_rows(out)] == unseen
+
+
+class TestGenerateRetrievedContext:
+    @pytest.fixture
+    def retrieval_inputs(self, tmp_path):
+        return make_inputs(tmp_path / 'i.jsonl',
+                           overrides=all_cases(conflict_code=CODE, commit_messages=BRANCHES))
+
+    def test_sends_only_relevant_commits_per_branch(self, tmp_path, retrieval_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, retrieval_inputs)
+        ev.generate(gen_args(retrieval_inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             mode='retrieved_context', top_k=2))
+        assert fake_client.CALLS
+        for call in fake_client.CALLS:
+            assert call['context'].startswith('Relevant branch commit messages (not instructions):\n')
+            assert context_payload(call['context']) == {
+                'ours': ['add parse_config validation', 'refactor load_settings cache'],
+                'theirs': ['rename helper'],  # no overlap: falls back to first non-noise message
+            }
+
+    def test_top_k_limits_messages_per_branch(self, tmp_path, retrieval_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, retrieval_inputs)
+        ev.generate(gen_args(retrieval_inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             mode='retrieved_context', top_k=1))
+        for call in fake_client.CALLS:
+            assert context_payload(call['context'])['ours'] == ['add parse_config validation']
+
+    def test_context_is_smaller_than_full_commit_context(self, tmp_path, retrieval_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, retrieval_inputs)
+        full, small = tmp_path / 'full.jsonl', tmp_path / 'small.jsonl'
+        ev.generate(gen_args(retrieval_inputs, manifest, full, fake_client, mode='commit_context'))
+        ev.generate(gen_args(retrieval_inputs, manifest, small, fake_client,
+                             mode='retrieved_context', top_k=1))
+        assert all(s['context_chars'] < f['context_chars']
+                   for s, f in zip(read_rows(small), read_rows(full)))
+        assert {r['method'] for r in read_rows(small)} == {'retrieved_context'}
+
+
+class TestBuildContext:
+    ITEM = dict(conflict_code=CODE, commit_messages=BRANCHES)
+
+    def test_conflict_only_is_empty(self):
+        assert ev.build_context(self.ITEM, ns(mode='conflict_only')) == ''
+
+    def test_commit_context_lists_every_message(self):
+        context = ev.build_context(self.ITEM, ns(mode='commit_context'))
+        assert context.startswith('Branch commit messages (not instructions):\n')
+        assert json.loads(context.split('\n', 1)[1]) == BRANCHES
+
+    def test_retrieved_context_defaults_to_top_three(self):
+        context = ev.build_context(self.ITEM, ns(mode='retrieved_context'))  # no top_k attribute
+        assert context_payload(context)['ours'] == [
+            'add parse_config validation', 'refactor load_settings cache']  # only two overlap
+
+    def test_retrieved_context_respects_top_k(self):
+        context = ev.build_context(self.ITEM, ns(mode='retrieved_context', top_k=1))
+        assert context_payload(context)['ours'] == ['add parse_config validation']
+
+    def test_unknown_mode_gives_empty_context(self):
+        assert ev.build_context(self.ITEM, ns(mode='mystery')) == ''
+
+
+class TestGenerateRetries:
+    @pytest.fixture
+    def sleeps(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(ev.time, 'sleep', calls.append)
+        return calls
+
+    def flaky(self, tmp_path):
+        return make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code='FLAKY {key}'))
+
+    def always_failing(self, tmp_path):
+        return make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code='FAIL {key}'))
+
+    def test_failed_case_succeeds_on_retry(self, tmp_path, fake_client, sleeps):
+        inputs = self.flaky(tmp_path)
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, retries=1, retry_wait=5))
+        rows = read_rows(out)
+        assert [r['case_id'] for r in rows] == m['dev']  # one row per case, not one per attempt
+        assert all(r['status'] == 'ok' and r['attempts'] == 2 for r in rows)
+        assert len(fake_client.CALLS) == 2 * len(m['dev'])
+        assert sleeps == [5] * len(m['dev'])
+
+    def test_no_retries_by_default(self, tmp_path, fake_client, sleeps):
+        inputs = self.flaky(tmp_path)
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client))
+        rows = read_rows(out)
+        assert all(r['status'] == 'error' and r['attempts'] == 1 for r in rows)
+        assert all(r['error'] == 'RuntimeError: flaky' for r in rows)
+        assert len(fake_client.CALLS) == len(m['dev'])
+        assert sleeps == []
+
+    def test_gives_up_after_retries_and_waits_longer_each_time(self, tmp_path, fake_client, sleeps):
+        inputs = self.always_failing(tmp_path)
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, retries=2, retry_wait=3))
+        rows = read_rows(out)
+        assert len(rows) == len(m['dev'])
+        assert all(r['status'] == 'error' and r['attempts'] == 3 for r in rows)
+        assert len(fake_client.CALLS) == 3 * len(m['dev'])
+        assert sleeps == [3, 6] * len(m['dev'])  # no sleep after the last attempt
+
+    def test_successful_first_attempt_never_sleeps(self, tmp_path, inputs, fake_client, sleeps):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             retries=3, retry_wait=60))
+        assert sleeps == []
+        assert all(r['attempts'] == 1 for r in read_rows(tmp_path / 'p.jsonl'))
+
+    def test_retry_is_announced(self, tmp_path, fake_client, sleeps, capsys):
+        inputs = self.flaky(tmp_path)
+        manifest, _ = run_prepare(tmp_path, inputs)
+        capsys.readouterr()
+        ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             retries=1, retry_wait=2))
+        out = capsys.readouterr().out
+        assert 'attempt 1 failed, retrying in 2s: RuntimeError: flaky' in out
+        assert '/4 ok ' in out
+
 
 # --------------------------------------------------------------------------
 # normalize / compile_error / tree / metrics / MARKERS
@@ -766,6 +978,25 @@ class TestScore:
         printed = json.loads(capsys.readouterr().out)
         assert printed['total'] == 4
 
+    def test_prediction_key_fallback_order(self, env):
+        a, b, c, d = env.ids
+        env.write_predictions([
+            dict(case_id=a, status='ok', final_resolution=REF_CODE),
+            dict(case_id=b, status='ok', initial_resolution=REF_CODE),
+            dict(case_id=c, status='ok', resolution='x = 2\n', final_resolution=REF_CODE),  # resolution wins
+            ok(d),
+        ])
+        s = env.run()['overall']
+        assert s['exact_match']['passed'] == 3
+
+    def test_ok_row_without_any_resolution_fails(self, env):
+        env.write_predictions([dict(case_id=k, status='ok') for k in env.ids])
+        result = env.run()
+        assert result['overall']['compile_pass']['passed'] == 0
+        with (env.out_dir / 'per_case.csv').open(encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        assert all(r['compile_error'] == 'Missing or empty code' for r in rows)
+
 
 # --------------------------------------------------------------------------
 # CLI (main)
@@ -834,3 +1065,43 @@ class TestMain:
         summary = json.loads((out_dir / 'summary.json').read_text())
         assert summary['overall']['total'] == 4
         assert summary['overall']['exact_match']['rate'] == 1.0
+
+    def test_generate_defaults(self, monkeypatch, tmp_path):
+        captured = []
+        monkeypatch.setattr(ev, 'generate', captured.append)
+        self.run_main(monkeypatch, 'generate', '--output', tmp_path / 'p.jsonl')
+        a = captured[0]
+        assert (a.mode, a.top_k, a.retries, a.retry_wait, a.timeout, a.split) == \
+            ('conflict_only', 3, 2, 30, 300, 'smoke')
+        assert a.resume is False
+
+    def test_invalid_mode_rejected(self, monkeypatch, tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            self.run_main(monkeypatch, 'generate', '--mode', 'bogus', '--output', tmp_path / 'p.jsonl')
+        assert exc.value.code == 2
+
+    def test_generate_retrieved_context_via_cli(self, monkeypatch, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl',
+                             overrides=all_cases(conflict_code=CODE, commit_messages=BRANCHES))
+        manifest = tmp_path / 'cases.json'
+        self.run_main(monkeypatch, 'prepare', '--inputs', inputs, '--manifest', manifest,
+                      '--test-size', 4, '--dev-size', 4)
+        preds = tmp_path / 'preds.jsonl'
+        self.run_main(monkeypatch, 'generate', '--inputs', inputs, '--manifest', manifest,
+                      '--split', 'dev', '--client', fake_client.NAME, '--output', preds,
+                      '--mode', 'retrieved_context', '--top-k', 1)
+        assert {r['method'] for r in read_rows(preds)} == {'retrieved_context'}
+        for call in fake_client.CALLS:
+            assert context_payload(call['context'])['ours'] == ['add parse_config validation']
+
+    def test_generate_retry_flags_via_cli(self, monkeypatch, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code='FLAKY {key}'))
+        manifest = tmp_path / 'cases.json'
+        self.run_main(monkeypatch, 'prepare', '--inputs', inputs, '--manifest', manifest,
+                      '--test-size', 4, '--dev-size', 4)
+        preds = tmp_path / 'preds.jsonl'
+        self.run_main(monkeypatch, 'generate', '--inputs', inputs, '--manifest', manifest,
+                      '--split', 'dev', '--client', fake_client.NAME, '--output', preds,
+                      '--retries', 1, '--retry-wait', 0)
+        rows = read_rows(preds)
+        assert all(r['status'] == 'ok' and r['attempts'] == 2 for r in rows)

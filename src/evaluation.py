@@ -11,6 +11,7 @@ import random
 import re
 import sys
 import time
+from src.commit_retrieval import format_commit_context, select_commits
 
 VERSION = '1.0'
 
@@ -106,6 +107,13 @@ def selected(a):
         raise ValueError('Selected partition is empty or has duplicate IDs')
     return ids
 
+def build_context(x, a):
+    if a.mode == 'commit_context':
+        return 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
+    if a.mode == 'retrieved_context':
+        return format_commit_context(select_commits(x['commit_messages'], x['conflict_code'], getattr(a, 'top_k', 3)))
+    return ''
+
 
 def generate(a):
     ids = selected(a)
@@ -123,6 +131,7 @@ def generate(a):
                   client=a.client, client_sha256=digest(client.__file__),
                   model=getattr(client, 'OLLAMA_MODEL', None),
                   base_url=getattr(client, 'OLLAMA_BASE_URL', None), timeout=a.timeout,
+                  top_k=getattr(a, 'top_k', None),
                   python=platform.python_version(),
                   note='Generation settings are inherited from client; current supplied client does not fix seed/temperature or report truncation.')
     meta = Path(str(output) + '.meta.json')
@@ -142,13 +151,11 @@ def generate(a):
             if key in done:
                 continue
             x = inputs[key]
-            context = ''
-            if a.mode == 'commit_context':
-                context = 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
+            context = build_context(x, a)
             # Retry so a brief server stall does not fail the case outright.
             retries = getattr(a, 'retries', 0)
             for attempt in range(1, retries + 2):
-                row = dict(case_id=key, method=a.mode, status='error', attempts=attempt)
+                row = dict(case_id=key, method=a.mode, status='error', attempts=attempt, context_chars=len(context))
                 start = time.monotonic()
                 try:
                     answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
@@ -285,7 +292,8 @@ def main():
         p.add_argument('--split', choices=['smoke', 'dev', 'test', 'unseen'], default='smoke')
         if command == 'generate':
             p.add_argument('--client', default='src.resolver.ollama_client')
-            p.add_argument('--mode', choices=['conflict_only', 'commit_context'], default='conflict_only')
+            p.add_argument('--mode', choices=['conflict_only', 'commit_context','retrieved_context'], default='conflict_only')
+            p.add_argument('--top-k', type=int, default=3, help='Messages kept per branch in retrieved_context mode')
             p.add_argument('--output', required=True)
             p.add_argument('--timeout', type=int, default=300)
             p.add_argument('--resume', action='store_true')

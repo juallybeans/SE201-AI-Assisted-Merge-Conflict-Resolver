@@ -1,0 +1,51 @@
+case_id,difficulty,status,latency_seconds,reference_compile_pass,reference_ast_parseable,error,exact_match,ast_match,compile_pass,marker_free,compile_error
+conan-io/conan/e3f1c988b4689971bda3846126495d7b82a907bf/conans/__init__.py,hard,ok,9.990113249979913,True,True,,False,False,True,True,
+dpgaspar/flask-appbuilder/7d3e8fb02df376dd9d021618116294112791069b/flask_appbuilder/version.py,easy,ok,11.05989316594787,True,True,,False,False,True,True,
+langchain-ai/langchain/2a2d3323c903e2e622236f8a021e2c2fc727d214/tests/unit_tests/chains/test_mrkl.py,hard,ok,14.94146558304783,True,True,,False,False,False,True,"IndentationError: unexpected indent (<resolution>, line 1)"
+microsoft/promptflow/f85b0d954885909e17d26c16ca29a23cc3f9c03d/examples/flows/evaluation/eval-code-quality/code_quality.py,easy,ok,42.422373624984175,True,True,,False,True,True,True,
+numba/numba/669da7ee5b031a0d8264e25a5e73136b61e18720/numba/npyufunc/decorators.py,easy,ok,59.493123499909416,True,True,,False,False,False,False,"SyntaxError: invalid decimal literal (<resolution>, line 50)"
+h2oai/h2ogpt/ea08016466bea6313fd8c66306326abf10be938e/src/version.py,easy,ok,7.7910864589503035,True,True,,False,False,True,True,
+h2oai/h2ogpt/aa7b8e81a9b1c321d8f17633d99addafed2f2cce/src/version.py,easy,ok,7.550035999971442,True,True,,False,False,True,True,
+zenml-io/zenml/541cf48bca36c11505c40cf385ad978b146bdf64/src/zenml/integrations/azure/__init__.py,easy,ok,33.24542770895641,True,True,,False,False,True,True,
+nvidia/nemo/7894f2c8604aa48ed7b40c468b6bb8dea5cd2f30/nemo/collections/diffusion/__init__.py,hard,ok,11.301028290996328,True,True,,False,True,True,True,
+nvidia/nemo/7894f2c8604aa48ed7b40c468b6bb8dea5cd2f30/nemo/collections/diffusion/vae/__init__.py,hard,ok,14.781222749967128,True,True,,False,True,True,True,
+pennylaneai/pennylane/5170017f97705ca11bbb5454088b75ca803b3eff/pennylane/labs/resource_estimation/ops/qubit/non_parametric_ops.py,hard,ok,47.628231666982174,True,True,,False,False,True,True,
+pennylaneai/pennylane/5170017f97705ca11bbb5454088b75ca803b3eff/pennylane/labs/resource_estimation/ops/qubit/parametric_ops_single_qubit.py,hard,ok,63.105495750089176,True,True,,False,False,False,True,"SyntaxError: unterminated string literal (detected at line 117) (<resolution>, line 117)"
+pyvista/pyvista/03a7f1fc55748d383517f91d17299c94ac17eaa9/pyvista/core/_typing_core/_aliases.py,hard,ok,35.486481125000864,True,True,,False,False,False,True,"SyntaxError: unterminated string literal (detected at line 22) (<resolution>, line 22)"
+pytorch/torchtitan/a6758dd734d4527387dcf89202f2f07f0a35cd74/torchtitan/parallelisms/parallel_dims.py,easy,ok,72.87806891708169,True,True,,False,False,True,True,
+h2oai/h2ogpt/e5c78549536b85c8c86372b647b003c237b001b3/src/version.py,easy,ok,8.58630558301229,True,True,,False,False,True,True,
+sheffieldml/gpy/717d3f56f2d71ed0a499f1492d39746997b2fbcc/GPy/models/__init__.py,easy,ok,7.27695308404509,True,True,,False,False,True,True,
+instaloader/instaloader/1875aede82f3045fad03a5463a5eb3ab0a89a4d7/instaloader/__init__.py,hard,ok,16.10514137498103,True,True,,False,False,True,True,
+readthedocs/readthedocs.org/c5b6b11264a2edb5bbf9a747ff933a85b740f07e/readthedocs/settings/proxito/base.py,easy,ok,26.789303625002503,True,True,,False,False,False,True,"SyntaxError: invalid syntax (<resolution>, line 1)"
+wandb/wandb/7f744b570ab3c8af26e7238b12a82ee3f3671134/standalone_tests/pytorch_tensorboard.py,hard,ok,35.74720608291682,True,True,,False,False,True,True,
+h2oai/h2ogpt/4735ea6505872ec3bbb273669bbb9d6ab144a399/src/version.py,easy,ok,9.391749250004068,True,True,,False,False,True,True,
+pennylaneai/pennylane/c2e46b3ba2d312a83e6626d375d4b2562e944597/pennylane/_version.py,easy,ok,7.234595458954573,True,True,,False,False,True,True,
+microsoft/promptflow/da3c6cc8ee42f6fcc858a5769bb39ccaa1ea7742/src/promptflow-evals/promptflow/evals/synthetic/__init__.py,hard,ok,14.273893584031612,True,True,,False,False,True,True,
+pyro-ppl/pyro/5d1610c3ccb1297d342b4800f52b04e5d2288b6e/pyro/distributions/__init__.py,hard,ok,42.64317679207306,True,True,,False,False,True,True,
+pyro-ppl/pyro/5d1610c3ccb1297d342b4800f52b04e5d2288b6e/pyro/distributions/testing/fakes.py,hard,ok,19.083936500013806,True,True,,False,False,True,True,
+pkkid/python-plexapi/74dff2791deeff7c12fa51b3103e11eb52ff65c8/setup.py,easy,ok,31.428809958975762,True,True,,False,False,True,True,
+streamlit/streamlit/fdbb370a284e6facd5a76b29d3072e3ef0397339/lib/streamlit/components/v1/components.py,easy,ok,10.4478588339407,True,True,,False,False,False,True,"IndentationError: unexpected indent (<resolution>, line 1)"
+conan-io/conan/4f00da067318b51c44c49404d73a8200934e1e56/conans/__init__.py,hard,ok,11.620135875069536,True,True,,False,False,True,True,
+conan-io/conan/7f03c1d340eedcf9772722361a42dfb4ba2fc81e/conans/__init__.py,hard,ok,7.483531457954086,True,True,,False,False,True,True,
+commaai/opendbc/361a23d4b59f4db6a2cc0070d9a27b283fa3c009/can/tests/test_parser.py,easy,ok,65.9815551249776,True,True,,False,False,True,True,
+conan-io/conan/72a3173053dabcd11e65980beda70837dcb65252/conans/__init__.py,hard,ok,10.671543832984753,True,True,,False,False,True,True,
+kivy/python-for-android/745dc6754aed5479fd3101af636c34feed357c72/pythonforandroid/__init__.py,easy,ok,5.83399999991525,True,True,,False,False,True,True,
+pykeen/pykeen/b06c086f1dd9683681ee93744e87841830af5e39/src/pykeen/triples/__init__.py,hard,ok,16.515250292024575,True,True,,False,False,True,True,
+adap/flower/3d7b61f490afa3cf665ad53bfa943a532d289a23/src/py/flwr/superexec/exec_servicer.py,hard,ok,44.227202834095806,True,True,,False,False,True,True,
+adap/flower/3d7b61f490afa3cf665ad53bfa943a532d289a23/src/py/flwr/superexec/executor.py,hard,ok,28.21192562498618,True,True,,False,False,True,True,
+streamlit/streamlit/dfc3172af5bdeec56b2b16dca39f39e63c69e2bd/lib/streamlit/runtime/state/query_params_proxy.py,easy,ok,11.058062292053364,True,True,,False,False,False,True,"IndentationError: unexpected indent (<resolution>, line 1)"
+conan-io/conan/201480146740d2ab298b9f360037ab9e56c2a6a5/conans/__init__.py,hard,ok,6.46629141701851,True,True,,False,False,True,True,
+great-expectations/great_expectations/3e516422295ee29a56c5c5546164e5ede20671e8/tests/integration/cloud/rest_contracts/test_checkpoints.py,easy,ok,69.42232991696801,True,True,,False,False,True,True,
+langchain-ai/langchain/e08017fcf7c9cc6213a0951984e522e04a2098b9/libs/community/tests/integration_tests/chat_models/test_volcengine_maas.py,hard,ok,44.01659016602207,True,True,,False,False,True,True,
+langchain-ai/langchain/e08017fcf7c9cc6213a0951984e522e04a2098b9/libs/community/tests/integration_tests/llms/test_volcengine_maas.py,hard,ok,19.183978917077184,True,True,,False,False,True,True,
+nvidia/nemo/cee170ff84c35e4292a5e8892f135b93d8036c35/nemo/collections/asr/data/audio_to_text_lhotse.py,easy,ok,6.782813667086884,True,True,,False,False,True,True,
+h2oai/h2ogpt/6b9dbf550d9b10e8d7075fb8036e5a671557b529/src/version.py,easy,ok,8.380840792087838,True,True,,False,False,True,True,
+chroma-core/chroma/e1b6f204f1cf0bcceab54a861465a6f8f4a172ee/chromadb/__init__.py,hard,ok,50.82502350001596,True,True,,False,False,True,True,
+chroma-core/chroma/e1b6f204f1cf0bcceab54a861465a6f8f4a172ee/chromadb/config.py,hard,ok,22.727145125041716,True,True,,False,False,True,True,
+schemathesis/schemathesis/f2d09215d0e9efbc94cbdeffe2f8d9be84606c81/src/schemathesis/specs/openapi/stateful/links.py,hard,ok,19.95388816704508,True,True,,False,False,False,True,"SyntaxError: '[' was never closed (<resolution>, line 15)"
+conan-io/conan/30fa4f1cd292c91f5004a553b512e1ee365dca6c/conans/__init__.py,easy,ok,6.674560250015929,True,True,,False,False,True,True,
+microsoft/promptflow/b51af9246daf5d6827c31ff8a025954d1651760e/src/promptflow-evals/promptflow/evals/evaluators/__init__.py,hard,ok,29.971509834052995,True,True,,False,True,True,True,
+conan-io/conan/306d5e744b2b95e4e0ec28f22835a72cf9094d41/conans/__init__.py,easy,ok,6.747534624999389,True,True,,False,False,True,True,
+conan-io/conan/770602e142e3fd15eb25f5eff8ba3832be7bcd44/conans/__init__.py,easy,ok,6.290784957935102,True,True,,False,False,True,True,
+giskard-ai/giskard/ac8fb7446e55db43fd6242cab10d231f37c19601/python-client/giskard/cli_utils.py,easy,ok,63.398435582988895,True,True,,False,False,True,True,
+graphql-python/graphene/85e354c139d4dd86bf8f87c53ceea3e26134b2a0/graphene/types/datetime.py,medium,ok,54.065325791947544,True,True,,False,False,True,True,
