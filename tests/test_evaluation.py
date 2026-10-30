@@ -481,6 +481,77 @@ class TestGenerate:
 
 
 # --------------------------------------------------------------------------
+# git baselines
+# --------------------------------------------------------------------------
+
+BASELINE_CONFLICT = 'keep\n<<<<<<< HEAD\nours = 1\n=======\ntheirs = 2\n>>>>>>> incoming\ntail\n'
+
+
+def baseline_inputs(tmp_path, conflict=BASELINE_CONFLICT):
+    return make_inputs(
+        tmp_path / 'inputs.jsonl',
+        overrides={f'g{g}-c{c}': {'conflict_code': conflict} for g in range(10) for c in range(2)},
+    )
+
+
+def baseline_args(inputs, manifest, output, mode):
+    return ns(inputs=str(inputs), manifest=str(manifest), split='dev',
+              client='no_such_client_module_xyz', mode=mode, output=str(output),
+              timeout=1, resume=False)
+
+
+class TestBaselines:
+    @pytest.mark.parametrize('mode,expected', [
+        ('ours', 'keep\nours = 1\ntail\n'),
+        ('theirs', 'keep\ntheirs = 2\ntail\n'),
+        ('union', 'keep\nours = 1\ntheirs = 2\ntail\n'),
+    ])
+    def test_generate_writes_git_resolution_without_a_model(self, tmp_path, mode, expected):
+        inputs = baseline_inputs(tmp_path)
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / f'{mode}.jsonl'
+        ev.generate(baseline_args(inputs, manifest, out, mode))
+        rows = read_rows(out)
+        assert [r['case_id'] for r in rows] == m['dev']
+        assert all(r['status'] == 'ok' and r['method'] == mode for r in rows)
+        assert all(r['resolution'] == expected for r in rows)
+        assert all(r['rationale'].startswith('Git merge-file') for r in rows)
+        meta = json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))
+        assert meta['mode'] == mode
+        assert 'client' not in meta and 'model' not in meta
+
+    def test_empty_side_is_saved_as_ok(self, tmp_path):
+        inputs = baseline_inputs(tmp_path, '<<<<<<< HEAD\n=======\nkept = 1\n>>>>>>> incoming\n')
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'ours.jsonl'
+        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
+        rows = read_rows(out)
+        assert all(r['status'] == 'ok' and r['resolution'] == '' for r in rows)
+
+    def test_unclosed_conflict_becomes_an_error_row(self, tmp_path):
+        inputs = baseline_inputs(tmp_path, '<<<<<<< HEAD\nours\n')
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'ours.jsonl'
+        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
+        rows = read_rows(out)
+        assert rows and all(r['status'] == 'error' for r in rows)
+        assert all('Unclosed conflict marker' in r['error'] for r in rows)
+        assert all('resolution' not in r for r in rows)
+
+    def test_resume_skips_cases_already_written(self, tmp_path):
+        inputs = baseline_inputs(tmp_path)
+        manifest, m = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'ours.jsonl'
+        ev.generate(baseline_args(inputs, manifest, out, 'ours'))
+        lines = out.read_text(encoding='utf-8').splitlines()
+        out.write_text(lines[0] + '\n', encoding='utf-8')
+        args = baseline_args(inputs, manifest, out, 'ours')
+        args.resume = True
+        ev.generate(args)
+        assert [r['case_id'] for r in read_rows(out)] == m['dev']
+
+
+# --------------------------------------------------------------------------
 # normalize / compile_error / tree / metrics / MARKERS
 # --------------------------------------------------------------------------
 
