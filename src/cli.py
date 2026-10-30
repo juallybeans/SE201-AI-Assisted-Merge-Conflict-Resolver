@@ -134,7 +134,10 @@ def main(argv=None) -> int:
             context = "\n".join(part for part in (retrieved, context) if part)
 
         try:
-            result = resolve_conflict(conflict["text"], context)
+            # The repair check parses Python, so only repair .py files.
+            result = resolve_conflict(
+                conflict["text"], context, repair=args.file.endswith(".py")
+            )
         except OllamaResolverError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
@@ -142,6 +145,11 @@ def main(argv=None) -> int:
         print_section("Suggested resolution", result["resolution"])
         print_section("Explanation", result["explanation"])
         print_section("Assumptions & risks", result["assumptions"])
+        if result.get("repair_attempted"):
+            note = f"First resolution failed: {result['initial_syntax_error']}"
+            if result.get("repair_error"):
+                note += f"\nRepair request failed: {result['repair_error']}"
+            print_section("Repair attempt", note)
 
         passed, message = validate(result["resolution"], args.file)
         status = "PASS" if passed else "FAIL"
