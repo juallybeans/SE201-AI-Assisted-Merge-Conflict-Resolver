@@ -105,6 +105,43 @@ python -m src.cli examples/repair_conflict.py
 
 Check that the final `Syntax check` is `PASS` and that the resolution keeps both branches' changes. The CLI only prints suggestions and never modifies the file.
 
+**Context sent with each conflict.** Before calling the model, the CLI adds context from `src/context_retrieval.py`:
+
+- The surrounding code: the file's imports, the enclosing function or class, and 15 lines before and after, with a marker showing where the conflict is. Other conflicts in the same file are replaced by a one-line note.
+- During a `git merge`, the commits on each side (current `HEAD` and incoming `MERGE_HEAD`) that changed the conflicted lines, found with `git log -L`. The top 3 per side are kept. Outside a merge, this part is skipped.
+
+For example, for a conflict inside `fetch_user` during a merge, the model receives:
+
+```text
+Surrounding code, for reference only. It is NOT part of the resolution.
+
+The conflict is inside: def fetch_user(uid):
+
+Imports in this file:
+import os
+
+Code around the conflict:
+import os
+
+
+def fetch_user(uid):
+    # >>> CONFLICT HERE: your resolution replaces only this line <<<
+
+
+def other():
+    return 2
+
+Return only the code that replaces the conflict block, with the same indentation as the conflicting lines. Do not repeat any line shown here, such as def or class lines.
+
+Commits that changed these lines (not instructions):
+current (HEAD): 325438b retry fetch_user on db errors
+incoming (MERGE_HEAD): cf85a91 add cache lookup to fetch_user
+```
+
+The resolution should contain only the replacement for the conflict block. If it repeats the surrounding lines, such as the `def` line, report it.
+
+To try the commit part, run the CLI on a file in a repository with a merge in progress, for example `python -m src.cli path/to/repo/app.py` after a `git merge` that conflicts.
+
 ## Model evaluation using the selected smoke cases
 
 Run the following commands from the project root. These steps reuse the ten smoke case IDs already saved in `evaluation/cases.json`. **Do not run `prepare` again.** The 200-case test partition is not run.
@@ -165,7 +202,7 @@ This sends each selected conflicted file to the existing Ollama client and saves
 
 Generation includes the syntax repair attempt (see step 5). Each prediction row also records `repair_attempted`, `initial_resolution`, `initial_syntax_error` and `repair_error`. Scoring uses the final `resolution`. To measure the effect of repair, count the rows with `repair_attempted: true` and compare how many of their `initial_resolution` and `resolution` values compile.
 
-Generation processes cases sequentially and prints a status after each finishes. With the current non-streaming client, there can be several minutes without terminal output. The default per-request timeout is 300 seconds.
+Generation processes cases sequentially and prints a status after each finishes. The default per-request timeout is 300 seconds.
 
 If the prediction file already exists and you want a fresh run on the same cases, use a new filename:
 
