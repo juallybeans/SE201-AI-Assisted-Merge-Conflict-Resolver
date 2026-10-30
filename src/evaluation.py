@@ -156,7 +156,11 @@ def generate(a):
                         raise ValueError('Client returned no nonempty string resolution')
                     row.update(status='ok', resolution=answer['resolution'],
                                rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
-                               done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'))
+                               done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'),
+                               repair_attempted=answer.get('repair_attempted', False),
+                               initial_resolution=answer.get('initial_resolution'),
+                               initial_syntax_error=answer.get('initial_syntax_error', ''),
+                               repair_error=answer.get('repair_error', ''))
                 except Exception as exc:
                     row['error'] = f'{type(exc).__name__}: {exc}'
                 row['latency_seconds'] = time.monotonic() - start
