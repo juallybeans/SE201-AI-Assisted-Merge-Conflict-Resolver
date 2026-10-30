@@ -218,7 +218,7 @@ The settings include a checksum of `ollama_client.py`. You cannot resume a run s
 
 ### 12. Run the 50 dev cases
 
-Run both modes on the 50-case `dev` split of the short-input manifest, then score each one. Use the same `--manifest` and `--split` for `generate` and `score`.
+Run the three model modes on the 50-case `dev` split of the short-input manifest, then score each one. Use the same `--manifest` and `--split` for `generate` and `score`.
 
 ```bash
 python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode conflict_only --timeout 120 --output results/short4000_dev_conflict_only.jsonl
@@ -226,9 +226,12 @@ python -m src.evaluation score --manifest evaluation/cases_short4000_context4000
 
 python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode commit_context --timeout 120 --output results/short4000_dev_commit_context.jsonl
 python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_commit_context.jsonl --out-dir results/short4000_dev_commit_context_scores
+
+python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode retrieved_context --top-k 3 --timeout 120 --output results/short4000_dev_retrieved_k3.jsonl
+python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_retrieved_k3.jsonl --out-dir results/short4000_dev_retrieved_k3_scores
 ```
 
-Compare the two `summary.json` files to see whether commit context changes the scores.
+`retrieved_context` sends only the commit messages most related to the conflict (the top `--top-k` per branch, default 3), instead of all of them like `commit_context`. Compare the three `summary.json` files to see whether commit context, and filtering it, changes the scores. Each prediction row records `context_chars`, the size of the context sent.
 
 ### 13. Git baselines (ours, theirs, union)
 
