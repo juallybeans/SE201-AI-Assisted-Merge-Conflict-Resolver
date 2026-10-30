@@ -73,19 +73,43 @@ curl http://localhost:<PORT>/api/tags
 
 You should see JSON listing the models on the cluster. If you get `Failed to connect`, the tunnel or the Jupyter session is down. Go back to steps 2–3.
 
-Then run the resolver on a sample conflict:
+### 5. Test the resolver and syntax repair
+
+If the model's resolution fails the syntax check (leftover conflict markers or invalid Python), the resolver makes **one** repair attempt. It sends the model the failed resolution and the error message.
+
+**Unit tests (no cluster needed).** These use a fake model:
+
+```bash
+python -m pytest tests/test_ollama_client.py -v
+```
+
+**Tests on cluster model.** These use the real model on cluster:
 
 ```bash
 python -m tests.test_ollama_client
 ```
 
-A successful run prints a proposed resolution, an explanation, and the assumptions and risks.
+Both parts should end with `Syntax check: PASS`.
+
+**CLI, normal conflicts.** Each conflict should pass without a repair:
+
+```bash
+python -m src.cli examples/sample_conflict.py
+```
+
+**CLI, conflicts with syntax errors.** Both branches contain errors, so a `Repair attempt` section showing the first error may appear before the final `Syntax check`:
+
+```bash
+python -m src.cli examples/repair_conflict.py
+```
+
+Check that the final `Syntax check` is `PASS` and that the resolution keeps both branches' changes. The CLI only prints suggestions and never modifies the file.
 
 ## Model evaluation using the selected smoke cases
 
 Run the following commands from the project root. These steps reuse the ten smoke case IDs already saved in `evaluation/cases.json`. **Do not run `prepare` again.** The 200-case test partition is not run.
 
-### 7. Check the evaluation files
+### 6. Check the evaluation files
 
 Ensure these files are present:
 
@@ -100,18 +124,18 @@ data/evaluation_references.jsonl
 
 Download the two JSONL files from the team's Google Drive into `data/`. Use the dataset version used to create `cases.json`; the evaluator checks its checksum.
 
-### 8. Activate your environment and run the unit tests
+### 7. Activate your environment and run the unit tests
 
 On macOS/Linux:
 
 ```bash
 source .venv/bin/activate
-python -m pytest tests/test_evaluation.py -v
+python -m pytest tests/ -v
 ```
 
-These unit tests check the evaluation logic without calling Ollama. Continue once they pass.
+These unit tests check the evaluation logic and the resolver's repair step without calling Ollama. Continue once they pass.
 
-### 9. Choose whether you need new predictions
+### 8. Choose whether you need new predictions
 
 ### Rescore predictions that already exist
 
@@ -125,7 +149,7 @@ This does not contact Ollama or change the saved predictions. It replaces `per_c
 
 The current prediction schema uses a `resolution` field. Old predictions with `initial_resolution`/`final_resolution` require the compatibility fallback in `score()` or conversion before use. No fallback is needed for new outputs.
 
-If you only need to rescore saved predictions, skip generation and go to step 11 to inspect the results.
+If you only need to rescore saved predictions, skip generation and go to step 10 to inspect the results.
 
 ### Generate predictions for the five smoke cases
 
@@ -139,6 +163,8 @@ python -m src.evaluation generate --split smoke --mode conflict_only --output re
 
 This sends each selected conflicted file to the existing Ollama client and saves the resolution, rationale, assumptions, status and runtime. Reference answers are not sent to the model.
 
+Generation includes the syntax repair attempt (see step 5). Each prediction row also records `repair_attempted`, `initial_resolution`, `initial_syntax_error` and `repair_error`. Scoring uses the final `resolution`. To measure the effect of repair, count the rows with `repair_attempted: true` and compare how many of their `initial_resolution` and `resolution` values compile.
+
 Generation processes cases sequentially and prints a status after each finishes. With the current non-streaming client, there can be several minutes without terminal output. The default per-request timeout is 300 seconds.
 
 If the prediction file already exists and you want a fresh run on the same cases, use a new filename:
@@ -149,7 +175,7 @@ python -m src.evaluation generate --split smoke --mode conflict_only --output re
 
 Use another new filename if that file also exists.
 
-### 10. Score the predictions
+### 9. Score the predictions
 
 For the first-run prediction file:
 
@@ -165,7 +191,7 @@ python -m src.evaluation score --split smoke --predictions results/smoke_predict
 
 Scoring uses the reference answers locally and does not require Ollama. Running it again replaces `per_case.csv` and `summary.json` in the specified output folder.
 
-### 11. Inspect the results
+### 10. Inspect the results
 
 | Output | Contents |
 |---|---|
@@ -178,7 +204,7 @@ Errors and missing predictions count as failures in the overall score denominato
 
 Compilation does not execute the generated code or prove behavioral correctness. The ten-case smoke run checks the pipeline; it is not a final performance estimate.
 
-### 12. Resume an interrupted generation, if needed
+### 11. Resume an interrupted generation, if needed
 
 Use the same options and output path as the interrupted run, adding `--resume`. For example:
 
@@ -188,7 +214,9 @@ python -m src.evaluation generate --split smoke --mode conflict_only --output re
 
 Keep the accompanying `.meta.json` file. Resume requires matching settings and skips every saved case, including errors. It does not retry failed cases. Use a new output filename for a fresh run.
 
-### 13. Run the 50 dev cases
+The settings include a checksum of `ollama_client.py`. You cannot resume a run started before the repair step was added; start a new output file instead.
+
+### 12. Run the 50 dev cases
 
 Run both modes on the 50-case `dev` split of the short-input manifest, then score each one. Use the same `--manifest` and `--split` for `generate` and `score`.
 
