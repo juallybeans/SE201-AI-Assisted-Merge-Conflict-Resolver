@@ -54,11 +54,17 @@ def check_syntax(code: str) -> str:
         line = code.count("\n", 0, match.start()) + 1
         return f"Conflict marker remains on line {line}: {match.group(0)}"
 
+        code = textwrap.dedent(code)
     try:
-        compile(textwrap.dedent(code), "<resolution>", "exec",
-                dont_inherit=True)
+        compile(code, "<resolution>", "exec", dont_inherit=True)
     except SyntaxError as exc:
-        return f"SyntaxError on line {exc.lineno}: {exc.msg}"
+        # A conflict inside a function body is resolved without its def
+        # line, so return/yield/await are valid there. Check it inside one.
+        wrapped = "async def _resolution():\n" + textwrap.indent(code, "    ")
+        try:
+            compile(wrapped, "<resolution>", "exec", dont_inherit=True)
+        except SyntaxError:
+            return f"SyntaxError on line {exc.lineno}: {exc.msg}"
     except (ValueError, TypeError, RecursionError) as exc:
         return f"{type(exc).__name__}: {exc}"
 

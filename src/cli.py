@@ -130,7 +130,7 @@ def main(argv=None) -> int:
 
         context = args.context
         if get_context is not None:
-            retrieved = get_context(args.file, conflict["text"])
+            retrieved = get_context(args.file, text, conflict)
             context = "\n".join(part for part in (retrieved, context) if part)
 
         try:
