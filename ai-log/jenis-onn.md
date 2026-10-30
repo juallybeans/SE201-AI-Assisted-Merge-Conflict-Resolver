@@ -99,4 +99,17 @@ I ran `python -m pytest tests -v` and all 200 tests passed (67 of them in test_c
 ### What I kept or changed
 I kept the updated test_evaluation.py and the new test_commit_retrieval.py. [EDIT: list any changes you made, or write "without making any edits".]
 
+## 2026-10-30 · Surrounding code and commit context for the CLI
+- **Tool (model):** Claude Code (Claude Opus 5.5)
+- **Files:** src/context_retrieval.py (new), src/cli.py, src/resolver/ollama_client.py
+- **Outcome:** Kept, after one round of fixes
+
+### What I asked for
+Surrounding code context and commit retrieval (cli) - for conflicted lines: give the CLI the code around each conflict, and the commit messages from each branch that changed the conflicted lines.
+
+### How I checked it
+I printed the context for examples/sample_conflict.py and checked that it showed the enclosing function and no conflict markers. Then I ran the CLI with the model on the cluster. The first run went wrong: one resolution copied a neighbouring function's def line, and a correct function body failed the repair step's syntax check with "'return' outside function". It was traced to two causes: the context listed "code before" and "code after" separately, and the repair check compiled function bodies on their own. After both fixes, both resolutions were function bodies only and passed the syntax check. I also made a small demo repo with a real merge conflict and checked that the right commit was listed for each side and that the initial commit was not. I also checked the dataset fields and found that conflict_code is already the whole file, so the evaluation needs no surrounding-code mode.
+
+### What I kept or changed
+I kept context_retrieval.py after fixes. The other changes were kept, manually inputting them into the files.
 
