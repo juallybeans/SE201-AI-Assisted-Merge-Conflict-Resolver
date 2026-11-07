@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "inputs_sha256": "62276295d6fb24904cdcbfae131b1ae7f237302b17ee20da7afee5afa55b154e",
+  "manifest_sha256": "98eb27af23d6263676d0c4892c17dd6782f553775fd0e1c0ef8300cc3a1238e7",
+  "split": "test",
+  "mode": "theirs",
+  "python": "3.13.5",
+  "note": "Git merge-file baseline applied to each conflict hunk. No model is called."
+}
