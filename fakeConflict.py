@@ -1,0 +1,1 @@
+print("this file can be used to simulate a merge conflict for testing purposes")
