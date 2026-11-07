@@ -28,12 +28,22 @@ CONFLICT_MARKERS = re.compile(
 RESPONSE_REQUIREMENTS = """
 Return valid JSON with exactly these fields:
 {
-  "resolution": "The complete resolved code as a string",
-  "explanation": "Explain what was retained, combined, or changed",
+  "resolution": "The code that replaces the conflict block, or an empty string",
+  "explanation": "Which side you kept or how you combined them, and why",
   "assumptions": "Describe uncertainties and possible risks"
 }
 
 The resolution field must contain code only, without Markdown fences.
+"""
+
+SIDES = """
+A conflict block has two sides:
+- Current side: the lines between <<<<<<< and =======. This is the
+  branch being merged into (HEAD).
+- Incoming side: the lines between ======= and >>>>>>>. This is the
+  branch being merged in.
+If there is a ||||||| section, it shows the original lines before
+either side changed them.
 """
 
 
@@ -158,10 +168,7 @@ def _generate(prompt: str, timeout: int) -> dict:
                     f"Model response has an invalid '{field}' field."
                 )
 
-        if not parsed["resolution"].strip():
-            raise OllamaResolverError(
-                "The proposed resolution is empty."
-            )
+        # An empty resolution is valid: it deletes the conflict block.
 
         # "length" means generation stopped at the num_predict cap.
         parsed["done_reason"] = result.get("done_reason", "")
@@ -197,15 +204,17 @@ def repair_resolution(
     prompt = f"""
 You are an expert software engineer assisting with Git merges.
 
-Your previous resolution of this merge conflict failed the syntax
-check. Fix the error and return a corrected resolution.
-
+Your previous resolution of this merge conflict block failed the
+syntax check. Fix the error and return a corrected resolution.
+{SIDES}
 Requirements:
 1. Fix the reported error and any other syntax problems.
 2. Keep the merge decisions of the previous resolution unless they
-   caused the error; do not discard either side's changes.
-3. Remove all Git conflict markers from the proposed code.
-4. Do not invent requirements unsupported by the context.
+   caused the error.
+3. Return only the code that replaces the conflict block. Do not
+   repeat code from outside the block.
+4. Remove all Git conflict markers from the proposed code.
+5. Do not invent requirements unsupported by the context.
 
 Repository context and relevant commit messages:
 {context or "(No additional context provided)"}
@@ -261,17 +270,33 @@ def resolve_conflict(
     prompt = f"""
 You are an expert software engineer assisting with Git merges.
 
-Resolve the supplied merge conflict conservatively.
+Resolve the supplied merge conflict block.
+{SIDES}
+The current branch is usually the main line of development. Using the
+code and the context, decide what the merged branch should contain:
+- the current side (the default),
+- the incoming side, only when it clearly has a change the merged
+  code needs,
+- both sides, when each adds something separate (such as different
+  imports or list items), or
+- a combination, when each side makes a different change that should
+  both be kept.
+If you cannot tell which side is right, keep the current side. Do not
+assume the incoming side is newer or preferred.
 
 Requirements:
-1. Understand both the current and incoming changes.
-2. Preserve the intended functionality of both sides when
-   they are compatible.
-3. Do not invent requirements unsupported by the context.
-4. Remove all Git conflict markers from the proposed code.
-5. If the changes are incompatible or the intent is unclear,
-   explain the uncertainty instead of silently discarding a change.
-6. Do not claim that the resolution passes tests unless tests
+1. Return only the code that replaces the conflict block, from the
+   <<<<<<< line to the >>>>>>> line. Do not repeat code from outside
+   the block, such as surrounding lines or def and class lines.
+2. Copy the lines you keep exactly, including quotes, spacing and
+   blank lines.
+3. Do not add code that is on neither side unless it is needed to
+   combine them.
+4. If the merged branch should contain nothing here, return an empty
+   resolution.
+5. Remove all Git conflict markers from the proposed code.
+6. If the intent is unclear, say so in the assumptions.
+7. Do not claim that the resolution passes tests unless tests
    have actually been run.
 
 Repository context and relevant commit messages:
