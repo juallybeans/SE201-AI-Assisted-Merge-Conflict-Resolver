@@ -6,14 +6,22 @@ Usage:
 
 For each conflict block in the file, the CLI prints the conflict,
 the suggested resolution, the explanation, the assumptions and risks,
-and a syntax check result. It never modifies the input file.
+and a syntax check result. It then shows a diff and asks whether to
+accept, edit or reject the resolution. Accepted and edited resolutions
+are written to the file; rejected blocks keep their conflict markers.
 """
 
 import argparse
 import ast
+import difflib
+import os
+import shlex
+import subprocess
 import sys
+import tempfile
 import textwrap
 
+from src.hunks import fit
 from src.resolver.ollama_client import OllamaResolverError, resolve_conflict
 
 # CLI falls back to simple defaults until they are implemented.
@@ -90,6 +98,78 @@ def print_section(title: str, body: str) -> None:
     print()
 
 
+def show_diff(conflict_text: str, resolution: str) -> None:
+    """Print a unified diff from the conflict block to the resolution."""
+    diff = difflib.unified_diff(
+        conflict_text.splitlines(),
+        resolution.splitlines(),
+        "conflict",
+        "resolution",
+        lineterm="",
+    )
+    print("--- Diff ---")
+    print("\n".join(diff))
+    print()
+
+
+def edit_in_editor(text: str, file_path: str) -> str:
+    """Open text in $VISUAL/$EDITOR (notepad or nano by default) and
+    return the edited text."""
+    editor = (
+        os.environ.get("VISUAL")
+        or os.environ.get("EDITOR")
+        or ("notepad" if os.name == "nt" else "nano")
+    )
+    suffix = os.path.splitext(file_path)[1]
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=suffix, delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(text)
+    try:
+        subprocess.run(shlex.split(editor) + [handle.name], check=False)
+        with open(handle.name, encoding="utf-8") as edited:
+            text = edited.read()
+    finally:
+        os.remove(handle.name)
+    return text if not text or text.endswith("\n") else text + "\n"
+
+
+def review(conflict_text: str, resolution: str, file_path: str, validate):
+    """
+    Show the diff and ask the user to accept, edit or reject.
+
+    Returns the text to put in place of the conflict block, or None
+    when the user rejects it (or there is no input to read).
+    """
+    while True:
+        show_diff(conflict_text, resolution)
+        passed, message = validate(resolution, file_path)
+        print_section("Syntax check", f"{'PASS' if passed else 'FAIL'}: {message}")
+        try:
+            choice = input("Apply? [a]ccept / [e]dit / [r]eject: ").strip().lower()
+        except EOFError:
+            return None
+        if choice in ("a", "accept"):
+            return resolution
+        if choice in ("r", "reject"):
+            return None
+        if choice in ("e", "edit"):
+            resolution = edit_in_editor(resolution, file_path)
+
+
+def apply_resolutions(text: str, conflicts: list[dict], pieces: list) -> str:
+    """Replace each conflict block with its piece. A None piece, or a
+    conflict without a piece, keeps the original block."""
+    lines = text.splitlines(keepends=True)
+    out, previous = [], 0
+    for conflict, piece in zip(conflicts, pieces):
+        out.extend(lines[previous:conflict["start_line"] - 1])
+        out.append(conflict["text"] if piece is None else piece)
+        previous = conflict["end_line"]
+    out.extend(lines[previous:])
+    return "".join(out)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m src.cli",
@@ -109,6 +189,8 @@ def main(argv=None) -> int:
     try:
         with open(args.file, encoding="utf-8") as handle:
             text = handle.read()
+            # Write the file back with the line endings it had.
+            newline = handle.newlines if isinstance(handle.newlines, str) else "\n"
     except OSError as exc:
         print(f"Error: could not read '{args.file}': {exc}", file=sys.stderr)
         return 1
@@ -120,6 +202,8 @@ def main(argv=None) -> int:
 
     total = len(conflicts)
     validate = check_syntax or default_syntax_check
+    pieces = []
+    status = 0
 
     for number, conflict in enumerate(conflicts, start=1):
         print(
@@ -139,8 +223,10 @@ def main(argv=None) -> int:
                 conflict["text"], context, repair=args.file.endswith(".py")
             )
         except OllamaResolverError as exc:
+            # Stop asking the model, but keep what was already accepted.
             print(f"Error: {exc}", file=sys.stderr)
-            return 1
+            status = 1
+            break
 
         print_section("Suggested resolution", result["resolution"])
         print_section("Explanation", result["explanation"])
@@ -151,11 +237,26 @@ def main(argv=None) -> int:
                 note += f"\nRepair request failed: {result['repair_error']}"
             print_section("Repair attempt", note)
 
-        passed, message = validate(result["resolution"], args.file)
-        status = "PASS" if passed else "FAIL"
-        print_section("Syntax check", f"{status}: {message}")
+        # The model may drop the block's indentation; fit restores it.
+        block_lines = conflict["text"].splitlines(keepends=True)
+        resolution = fit(result["resolution"], block_lines)
+        pieces.append(review(conflict["text"], resolution, args.file, validate))
 
-    return 0
+    applied = sum(piece is not None for piece in pieces)
+    if applied:
+        try:
+            with open(args.file, "w", encoding="utf-8", newline=newline) as handle:
+                handle.write(apply_resolutions(text, conflicts, pieces))
+        except OSError as exc:
+            print(f"Error: could not write '{args.file}': {exc}", file=sys.stderr)
+            return 1
+
+    print(f"Applied {applied} of {total} resolution(s) to '{args.file}'.")
+    if applied == total:
+        print(f"All conflicts resolved. Check the file, then run: git add {args.file}")
+    else:
+        print("Unresolved conflicts keep their conflict markers.")
+    return status
 
 
 if __name__ == "__main__":

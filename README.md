@@ -103,7 +103,7 @@ python -m src.cli examples/sample_conflict.py
 python -m src.cli examples/repair_conflict.py
 ```
 
-Check that the final `Syntax check` is `PASS` and that the resolution keeps both branches' changes. The CLI only prints suggestions and never modifies the file.
+Check that the final `Syntax check` is `PASS` and that the resolution keeps both branches' changes. After each suggestion, the CLI shows a diff and asks `Apply? [a]ccept / [e]dit / [r]eject`. Accepted or edited resolutions are written to the file; rejected conflicts keep their markers. **Edit** opens the resolution in `$EDITOR` (Notepad on Windows, nano elsewhere; for VS Code set `EDITOR="code --wait"`). To try it without changing the example files, run it on a copy.
 
 **Context sent with each conflict.** Before calling the model, the CLI adds context from `src/context_retrieval.py`:
 

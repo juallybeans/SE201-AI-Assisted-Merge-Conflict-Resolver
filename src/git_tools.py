@@ -1,4 +1,4 @@
-"""Run a Git merge and suggest resolutions for any conflicted files."""
+"""Run a Git merge, then review and apply resolutions for conflicted files."""
 
 import argparse
 import os
@@ -59,8 +59,7 @@ def run_merge(branch: str, repository: str) -> int:
         if resolve_file([file_path]) != 0:
             suggestions_failed = True
 
-    print("\nThe suggestions have not changed your files.")
-    print("Review and apply resolutions, then stage the files with git add.")
+    print("\nCheck the resolved files, then stage them with git add.")
     print("The merge remains in progress until you finish resolving and commit.")
 
     # Preserve Git's nonzero status: conflicts mean the merge is not complete.
