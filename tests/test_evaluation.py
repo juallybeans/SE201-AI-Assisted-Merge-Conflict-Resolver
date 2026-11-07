@@ -72,8 +72,8 @@ OLLAMA_BASE_URL = "http://localhost:0"
 ATTEMPTS = {}
 
 
-def resolve_conflict(conflict, context, timeout):
-    CALLS.append(dict(conflict=conflict, context=context, timeout=timeout))
+def resolve_conflict(conflict, context, timeout, repair=True):
+    CALLS.append(dict(conflict=conflict, context=context, timeout=timeout, repair=repair))
     ATTEMPTS[conflict] = ATTEMPTS.get(conflict, 0) + 1
     if "FAIL" in conflict:
         raise RuntimeError("boom")
@@ -104,10 +104,10 @@ def fake_client(tmp_path, monkeypatch):
 
 
 def gen_args(inputs, manifest, output, client, split='dev', mode='conflict_only',
-             timeout=300, resume=False, top_k=3, retries=0, retry_wait=0):
+             timeout=300, resume=False, top_k=3, retries=0, retry_wait=0, per_hunk=False):
     return ns(inputs=str(inputs), manifest=str(manifest), split=split, client=client.NAME,
               mode=mode, output=str(output), timeout=timeout, resume=resume,
-              top_k=top_k, retries=retries, retry_wait=retry_wait)
+              top_k=top_k, retries=retries, retry_wait=retry_wait, per_hunk=per_hunk)
 
 
 def all_cases(**fields):
@@ -132,6 +132,21 @@ CODE = 'def parse_config():\n    return load_settings()\n'
 def context_payload(context):
     """The JSON part of a retrieved_context prompt."""
     return json.loads(context.split('\n', 1)[1])
+
+
+def commits_in(context):
+    """The commit JSON from a per-hunk prompt, where surrounding code follows it."""
+    return json.loads(context.split('\n\n')[0].split('\n', 1)[1])
+
+
+# A whole file with one conflict block, the way the dataset stores conflict_code.
+CONFLICT_BLOCK = '<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> feature\n'
+CONFLICT_FILE = 'before = 1\n' + CONFLICT_BLOCK + 'after = 2\n'
+
+# Two blocks, each mentioning a different function, for per-hunk commit matching.
+TWO_BLOCK_FILE = (
+    'def parse_config():\n<<<<<<< HEAD\n    a = parse_config_one\n=======\n    a = 2\n>>>>>>> feature\n'
+    'def load_settings():\n<<<<<<< HEAD\n    b = load_settings_one\n=======\n    b = 2\n>>>>>>> feature\n')
 
 
 # --------------------------------------------------------------------------
@@ -516,6 +531,17 @@ class TestGenerate:
             assert r['done_reason'] == 'stop'
             assert r['eval_count'] == 7
 
+    def test_whole_file_rows_have_empty_repair_fields(self, tmp_path, inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client))
+        for r in read_rows(out):
+            assert r['repair_attempted'] is False
+            assert r['initial_resolution'] is None
+            assert r['initial_syntax_error'] == ''
+            assert r['repair_error'] == ''
+            assert r['hunks'] is None
+
     def test_metadata_binds_run_settings(self, tmp_path, fake_client):
         # retrieved_context needs commit_messages keyed by branch (a dict), not a plain list.
         inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(commit_messages=BRANCHES))
@@ -525,6 +551,7 @@ class TestGenerate:
         meta = json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))
         assert meta['mode'] == 'retrieved_context'
         assert meta['top_k'] == 2
+        assert meta['per_hunk'] is False
         assert meta['client'] == fake_client.NAME
         assert meta['client_sha256'] == ev.digest(fake_client.__file__)
         assert meta['timeout'] == 300
@@ -664,6 +691,22 @@ class TestBuildContext:
     def test_unknown_mode_gives_empty_context(self):
         assert ev.build_context(self.ITEM, ns(mode='mystery')) == ''
 
+    def test_code_argument_replaces_the_conflict_for_matching(self):
+        context = ev.build_context(self.ITEM, ns(mode='retrieved_context', top_k=1),
+                                   code='refactor load_settings cache')
+        assert context_payload(context)['ours'] == ['refactor load_settings cache']
+
+    def test_empty_code_falls_back_to_the_conflict(self):
+        context = ev.build_context(self.ITEM, ns(mode='retrieved_context', top_k=1), code='')
+        assert context_payload(context)['ours'] == ['add parse_config validation']
+
+    def test_commit_context_ignores_code(self):
+        plain = ev.build_context(self.ITEM, ns(mode='commit_context'))
+        assert ev.build_context(self.ITEM, ns(mode='commit_context'), code='anything') == plain
+
+    def test_conflict_only_ignores_code(self):
+        assert ev.build_context(self.ITEM, ns(mode='conflict_only'), code='anything') == ''
+
 
 class TestGenerateRetries:
     @pytest.fixture
@@ -727,6 +770,254 @@ class TestGenerateRetries:
         out = capsys.readouterr().out
         assert 'attempt 1 failed, retrying in 2s: RuntimeError: flaky' in out
         assert '/4 ok ' in out
+
+
+class TestGenerateBaselines:
+    """ours / theirs / union run without a model."""
+
+    @pytest.fixture
+    def conflict_inputs(self, tmp_path):
+        return make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=CONFLICT_FILE))
+
+    def args(self, inputs, manifest, output, mode, resume=False, retries=0):
+        # The client module does not exist: baselines must never import it.
+        return ns(inputs=str(inputs), manifest=str(manifest), split='dev',
+                  client='no_such_client_module_xyz', mode=mode, output=str(output),
+                  timeout=300, resume=resume, top_k=3, per_hunk=False,
+                  retries=retries, retry_wait=0)
+
+    def test_the_three_git_strategies_exist(self):
+        assert {'ours', 'theirs', 'union'} <= set(ev.BASELINE_MODES)
+
+    @pytest.mark.parametrize('mode', ev.BASELINE_MODES)
+    def test_rows_are_ok_and_need_no_model(self, tmp_path, conflict_inputs, mode):
+        manifest, m = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, mode))
+        rows = read_rows(out)
+        assert [r['case_id'] for r in rows] == m['dev']
+        for r in rows:
+            assert r['status'] == 'ok' and r['method'] == mode and r['attempts'] == 1
+            assert r['rationale'] == ev.RATIONALE[mode]
+            assert r['assumptions'] == ''
+            assert isinstance(r['resolution'], str) and r['resolution'].strip()
+            assert r['latency_seconds'] >= 0
+            assert 'context_chars' not in r and 'error' not in r
+            assert not ev.MARKERS.search(r['resolution'])
+            assert r['resolution'].startswith('before = 1\n') and r['resolution'].endswith('after = 2\n')
+
+    def resolutions(self, tmp_path, inputs, mode):
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / f'{mode}.jsonl'
+        ev.generate(self.args(inputs, manifest, out, mode))
+        return {r['resolution'] for r in read_rows(out)}
+
+    def test_ours_keeps_the_current_side(self, tmp_path, conflict_inputs):
+        assert self.resolutions(tmp_path, conflict_inputs, 'ours') == {'before = 1\nx = 1\nafter = 2\n'}
+
+    def test_theirs_keeps_the_incoming_side(self, tmp_path, conflict_inputs):
+        assert self.resolutions(tmp_path, conflict_inputs, 'theirs') == {'before = 1\nx = 2\nafter = 2\n'}
+
+    def test_union_keeps_both_sides_current_first(self, tmp_path, conflict_inputs):
+        assert self.resolutions(tmp_path, conflict_inputs, 'union') == {
+            'before = 1\nx = 1\nx = 2\nafter = 2\n'}
+
+    @pytest.mark.parametrize('mode, expected', [
+        ('ours', 'a\nO1\nm\nO2\nz\n'),
+        ('theirs', 'a\nT1\nm\nT2\nz\n'),
+        ('union', 'a\nO1\nT1\nm\nO2\nT2\nz\n'),
+    ])
+    def test_several_blocks_and_a_diff3_base(self, tmp_path, mode, expected):
+        code = ('a\n<<<<<<< HEAD\nO1\n||||||| base\nB1\n=======\nT1\n>>>>>>> x\n'
+                'm\n<<<<<<< HEAD\nO2\n=======\nT2\n>>>>>>> y\nz\n')
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=code))
+        assert self.resolutions(tmp_path, inputs, mode) == {expected}
+
+    @pytest.mark.parametrize('mode', ev.BASELINE_MODES)
+    def test_text_without_markers_becomes_an_error_row(self, tmp_path, inputs, mode):
+        manifest, _ = run_prepare(tmp_path, inputs)  # default conflict_code has no markers
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(inputs, manifest, out, mode, retries=2))
+        rows = read_rows(out)
+        assert all(r['status'] == 'error' and r['attempts'] == 1 for r in rows)
+        assert all(r['error'] == 'ValueError: No conflict markers found' for r in rows)
+        assert all('resolution' not in r for r in rows)
+
+    @pytest.mark.parametrize('code, message', [
+        ('<<<<<<< HEAD\nx\n=======\ny\n', 'Unclosed conflict marker'),
+        ('<<<<<<< HEAD\nx\n>>>>>>> b\n', 'missing the ======= separator'),
+    ])
+    def test_malformed_blocks_become_error_rows(self, tmp_path, code, message):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=code))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(inputs, manifest, out, 'ours'))
+        assert all(message in r['error'] for r in read_rows(out))
+
+    @pytest.mark.parametrize('mode', ev.BASELINE_MODES)
+    def test_metadata_has_no_model_settings(self, tmp_path, conflict_inputs, mode):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, mode))
+        meta = json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))
+        assert meta['mode'] == mode and meta['split'] == 'dev'
+        assert meta['inputs_sha256'] == ev.digest(conflict_inputs)
+        assert meta['manifest_sha256'] == ev.digest(manifest)
+        assert meta['python'] == platform.python_version()
+        assert 'No model is called' in meta['note']
+        for key in ('client', 'client_sha256', 'model', 'base_url', 'timeout', 'top_k', 'per_hunk'):
+            assert key not in meta
+
+    def test_resume_fills_in_only_the_missing_cases(self, tmp_path, conflict_inputs):
+        manifest, m = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, 'ours'))
+        out.write_text(out.read_text(encoding='utf-8').splitlines()[0] + '\n', encoding='utf-8')
+        ev.generate(self.args(conflict_inputs, manifest, out, 'ours', resume=True))
+        assert [r['case_id'] for r in read_rows(out)] == m['dev']
+
+    def test_resume_with_a_different_baseline_raises(self, tmp_path, conflict_inputs):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, 'ours'))
+        with pytest.raises(ValueError, match='Resume settings differ'):
+            ev.generate(self.args(conflict_inputs, manifest, out, 'theirs', resume=True))
+
+    def test_resume_cannot_switch_between_baseline_and_model(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, 'ours'))
+        with pytest.raises(ValueError, match='Resume settings differ'):
+            ev.generate(gen_args(conflict_inputs, manifest, out, fake_client, resume=True))
+
+    def test_failures_become_error_rows_and_are_not_retried(self, tmp_path, conflict_inputs, monkeypatch):
+        calls = []
+
+        def broken(code, mode):
+            calls.append((code, mode))
+            raise ValueError('bad hunk')
+
+        monkeypatch.setattr(ev, 'resolve_baseline', broken)
+        manifest, m = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, 'union', retries=3))
+        rows = read_rows(out)
+        assert all(r['status'] == 'error' and r['attempts'] == 1 for r in rows)
+        assert all(r['error'] == 'ValueError: bad hunk' for r in rows)
+        assert all('resolution' not in r for r in rows)
+        assert calls == [(CONFLICT_FILE, 'union')] * len(m['dev'])
+
+    def test_plain_list_commit_messages_are_fine(self, tmp_path, conflict_inputs):
+        # Only retrieved_context needs commit_messages keyed by branch.
+        manifest, m = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(self.args(conflict_inputs, manifest, out, 'ours'))
+        assert len(read_rows(out)) == len(m['dev'])
+
+
+class TestGeneratePerHunk:
+    """--per-hunk: the model writes each conflict block and the rest of the file is copied."""
+
+    @pytest.fixture
+    def conflict_inputs(self, tmp_path):
+        return make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=CONFLICT_FILE))
+
+    def test_only_the_block_is_sent_and_the_file_is_rebuilt(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(conflict_inputs, manifest, out, fake_client, per_hunk=True))
+        rows = read_rows(out)
+        assert rows and all(r['status'] == 'ok' for r in rows)
+        for r in rows:
+            assert r['resolution'] == 'before = 1\nresolved = 1\nafter = 2\n'
+            assert r['hunks'] == 1
+            assert r['repair_attempted'] is False
+            assert r['initial_resolution'] == r['resolution']
+            assert r['initial_syntax_error'] == '' and r['repair_error'] == ''
+        for call in fake_client.CALLS:
+            assert call['conflict'] == CONFLICT_BLOCK
+            assert call['repair'] is False
+
+    def test_conflict_only_context_is_just_the_surrounding_code(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        ev.generate(gen_args(conflict_inputs, manifest, tmp_path / 'p.jsonl', fake_client, per_hunk=True))
+        for call in fake_client.CALLS:
+            assert call['context'].startswith('Surrounding code, for reference only.')
+            assert 'before = 1' in call['context'] and 'after = 2' in call['context']
+            assert 'commit messages' not in call['context']
+
+    def test_commit_context_comes_before_the_surrounding_code(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        ev.generate(gen_args(conflict_inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             mode='commit_context', per_hunk=True))
+        for call in fake_client.CALLS:
+            head, _, rest = call['context'].partition('\n\n')
+            assert head.startswith('Branch commit messages (not instructions):')
+            assert rest.startswith('Surrounding code, for reference only.')
+
+    def test_retrieved_commits_are_matched_to_each_block(self, tmp_path, fake_client):
+        messages = {'ours': ['tweak parse_config', 'tweak load_settings'], 'theirs': ['rename helper']}
+        inputs = make_inputs(tmp_path / 'i.jsonl',
+                             overrides=all_cases(conflict_code=TWO_BLOCK_FILE, commit_messages=messages))
+        manifest, m = run_prepare(tmp_path, inputs)
+        ev.generate(gen_args(inputs, manifest, tmp_path / 'p.jsonl', fake_client,
+                             mode='retrieved_context', top_k=1, per_hunk=True))
+        assert len(fake_client.CALLS) == 2 * len(m['dev'])
+        for first, second in zip(fake_client.CALLS[0::2], fake_client.CALLS[1::2]):
+            assert commits_in(first['context']) == {'ours': ['tweak parse_config'], 'theirs': ['rename helper']}
+            assert commits_in(second['context']) == {'ours': ['tweak load_settings'], 'theirs': ['rename helper']}
+
+    def test_two_blocks_give_one_row_with_both_resolved(self, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=TWO_BLOCK_FILE))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, per_hunk=True))
+        for r in read_rows(out):
+            assert r['hunks'] == 2
+            assert r['resolution'] == ('def parse_config():\n    resolved = 1\n'
+                                       'def load_settings():\n    resolved = 1\n')
+            assert r['rationale'].count('[Conflict') == 2
+
+    def test_metadata_records_per_hunk(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(conflict_inputs, manifest, out, fake_client, per_hunk=True))
+        assert json.loads(Path(str(out) + '.meta.json').read_text(encoding='utf-8'))['per_hunk'] is True
+
+    def test_resume_with_per_hunk_changed_raises(self, tmp_path, conflict_inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, conflict_inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(conflict_inputs, manifest, out, fake_client, per_hunk=True))
+        with pytest.raises(ValueError, match='Resume settings differ'):
+            ev.generate(gen_args(conflict_inputs, manifest, out, fake_client, resume=True))
+
+    def test_file_without_markers_becomes_an_error_row(self, tmp_path, inputs, fake_client):
+        manifest, _ = run_prepare(tmp_path, inputs)  # default conflict_code has no markers
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, per_hunk=True))
+        rows = read_rows(out)
+        assert all(r['status'] == 'error' for r in rows)
+        assert all(r['error'] == 'ValueError: No conflict markers found' for r in rows)
+        assert not fake_client.CALLS
+
+    def test_client_error_on_a_block_becomes_an_error_row(self, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(
+            conflict_code='<<<<<<< HEAD\nFAIL = 1\n=======\nFAIL = 2\n>>>>>>> feature\n'))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, per_hunk=True))
+        rows = read_rows(out)
+        assert all(r['status'] == 'error' and r['error'] == 'RuntimeError: boom' for r in rows)
+
+    def test_failed_cases_are_retried(self, tmp_path, fake_client, monkeypatch):
+        monkeypatch.setattr(ev.time, 'sleep', lambda seconds: None)
+        # '{key}' makes each case's block unique, so each case fails once and then succeeds.
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(
+            conflict_code='<<<<<<< HEAD\nx = "FLAKY {key}"\n=======\nx = 2\n>>>>>>> feature\n'))
+        manifest, _ = run_prepare(tmp_path, inputs)
+        out = tmp_path / 'p.jsonl'
+        ev.generate(gen_args(inputs, manifest, out, fake_client, per_hunk=True, retries=1))
+        assert all(r['status'] == 'ok' and r['attempts'] == 2 for r in read_rows(out))
 
 
 # --------------------------------------------------------------------------
@@ -1111,6 +1402,7 @@ class TestMain:
         assert (a.mode, a.top_k, a.retries, a.retry_wait, a.timeout, a.split) == \
             ('conflict_only', 3, 2, 30, 300, 'smoke')
         assert a.resume is False
+        assert a.per_hunk is False
 
     def test_invalid_mode_rejected(self, monkeypatch, tmp_path):
         with pytest.raises(SystemExit) as exc:
@@ -1154,3 +1446,47 @@ class TestMain:
                           '--output', tmp_path / 'p.jsonl', '--mode', 'retrieved_context')
         assert exc.value.code == 1
         assert 'Error: retrieved_context needs commit_messages keyed by branch' in capsys.readouterr().err
+    def test_per_hunk_flag(self, monkeypatch, tmp_path):
+        captured = []
+        monkeypatch.setattr(ev, 'generate', captured.append)
+        self.run_main(monkeypatch, 'generate', '--output', tmp_path / 'p.jsonl', '--per-hunk')
+        assert captured[0].per_hunk is True
+
+    @pytest.mark.parametrize('mode', ev.BASELINE_MODES)
+    def test_baseline_modes_are_accepted(self, monkeypatch, tmp_path, mode):
+        captured = []
+        monkeypatch.setattr(ev, 'generate', captured.append)
+        self.run_main(monkeypatch, 'generate', '--output', tmp_path / 'p.jsonl', '--mode', mode)
+        assert captured[0].mode == mode
+
+    def test_baseline_generate_and_score_end_to_end(self, monkeypatch, tmp_path, capsys):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=CONFLICT_FILE))
+        manifest = tmp_path / 'cases.json'
+        self.run_main(monkeypatch, 'prepare', '--inputs', inputs, '--manifest', manifest,
+                      '--test-size', 4, '--dev-size', 4)
+        preds = tmp_path / 'preds.jsonl'
+        # No --client: the default Ollama client must not be imported for a git baseline.
+        self.run_main(monkeypatch, 'generate', '--inputs', inputs, '--manifest', manifest,
+                      '--split', 'dev', '--output', preds, '--mode', 'ours')
+        assert {r['method'] for r in read_rows(preds)} == {'ours'}
+        m = json.loads(manifest.read_text())
+        refs = write_jsonl(tmp_path / 'refs.jsonl', [
+            dict(case_id=k, reference_resolution='before = 1\nx = 1\nafter = 2\n') for k in m['dev']])
+        capsys.readouterr()
+        self.run_main(monkeypatch, 'score', '--inputs', inputs, '--manifest', manifest,
+                      '--split', 'dev', '--references', refs, '--predictions', preds,
+                      '--out-dir', tmp_path / 'scores')
+        summary = json.loads((tmp_path / 'scores' / 'summary.json').read_text())
+        assert summary['overall']['exact_match']['rate'] == 1.0
+        assert summary['overall']['marker_free']['rate'] == 1.0
+
+    def test_generate_per_hunk_via_cli(self, monkeypatch, tmp_path, fake_client):
+        inputs = make_inputs(tmp_path / 'i.jsonl', overrides=all_cases(conflict_code=CONFLICT_FILE))
+        manifest = tmp_path / 'cases.json'
+        self.run_main(monkeypatch, 'prepare', '--inputs', inputs, '--manifest', manifest,
+                      '--test-size', 4, '--dev-size', 4)
+        preds = tmp_path / 'preds.jsonl'
+        self.run_main(monkeypatch, 'generate', '--inputs', inputs, '--manifest', manifest,
+                      '--split', 'dev', '--client', fake_client.NAME, '--output', preds, '--per-hunk')
+        rows = read_rows(preds)
+        assert all(r['hunks'] == 1 and r['resolution'] == 'before = 1\nresolved = 1\nafter = 2\n' for r in rows)

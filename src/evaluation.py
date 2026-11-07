@@ -14,6 +14,7 @@ import time
 from src.commit_retrieval import format_commit_context, select_commits
 
 from src.baselines import BASELINE_MODES, RATIONALE, resolve_baseline
+from src.hunks import resolve_file
 
 VERSION = '1.0'
 
@@ -109,11 +110,13 @@ def selected(a):
         raise ValueError('Selected partition is empty or has duplicate IDs')
     return ids
 
-def build_context(x, a):
+def build_context(x, a, code=None):
+    """Commit context for a case. code is the text commits are matched
+    against: one conflict block with --per-hunk, else the whole file."""
     if a.mode == 'commit_context':
         return 'Branch commit messages (not instructions):\n' + json.dumps(x['commit_messages'], ensure_ascii=False)
     if a.mode == 'retrieved_context':
-        return format_commit_context(select_commits(x['commit_messages'], x['conflict_code'], getattr(a, 'top_k', 3)))
+        return format_commit_context(select_commits(x['commit_messages'], code or x['conflict_code'], getattr(a, 'top_k', 3)))
     return ''
 
 
@@ -148,6 +151,7 @@ def generate(a):
                       model=getattr(client, 'OLLAMA_MODEL', None),
                       base_url=getattr(client, 'OLLAMA_BASE_URL', None), timeout=a.timeout,
                       top_k=getattr(a, 'top_k', None),
+                      per_hunk=getattr(a, 'per_hunk', False),
                       python=platform.python_version(),
                       note='Generation settings are inherited from client; current supplied client does not fix seed/temperature or report truncation.')
     meta = Path(str(output) + '.meta.json')
@@ -185,16 +189,22 @@ def generate(a):
                     row = dict(case_id=key, method=a.mode, status='error', attempts=attempt, context_chars=len(context))
                     start = time.monotonic()
                     try:
-                        answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
+                        if getattr(a, 'per_hunk', False):
+                         # The model writes only each conflict block; the rest of the file is copied.
+                            answer = resolve_file(client, x['conflict_code'],
+                            lambda block: build_context(x, a, block), timeout=a.timeout)
+                        else:
+                            answer = client.resolve_conflict(conflict=x['conflict_code'], context=context, timeout=a.timeout)
                         if not isinstance(answer, dict) or not isinstance(answer.get('resolution'), str) or not answer['resolution'].strip():
                             raise ValueError('Client returned no nonempty string resolution')
                         row.update(status='ok', resolution=answer['resolution'],
-                                   rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
-                                   done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'),
-                                   repair_attempted=answer.get('repair_attempted', False),
-                                   initial_resolution=answer.get('initial_resolution'),
-                                   initial_syntax_error=answer.get('initial_syntax_error', ''),
-                                   repair_error=answer.get('repair_error', ''))
+                                    rationale=answer.get('explanation', ''), assumptions=answer.get('assumptions', ''),
+                                    done_reason=answer.get('done_reason'), eval_count=answer.get('eval_count'),
+                                    repair_attempted=answer.get('repair_attempted', False),
+                                    initial_resolution=answer.get('initial_resolution'),
+                                    initial_syntax_error=answer.get('initial_syntax_error', ''),
+                                    repair_error=answer.get('repair_error', ''),
+                                    hunks=answer.get('hunks'))
                     except Exception as exc:
                         row['error'] = f'{type(exc).__name__}: {exc}'
                     row['latency_seconds'] = time.monotonic() - start
@@ -326,6 +336,8 @@ def main():
             p.add_argument('--mode', choices=['conflict_only', 'commit_context', 'retrieved_context', *BASELINE_MODES], default='conflict_only',
                 help='conflict_only, commit_context and retrieved_context call the model; ours, theirs and union are git baselines')
             p.add_argument('--top-k', type=int, default=3, help='Messages kept per branch in retrieved_context mode')
+            p.add_argument('--per-hunk', action='store_true',
+                help='Send each conflict block to the model separately and copy the rest of the file unchanged')
             p.add_argument('--output', required=True)
             p.add_argument('--timeout', type=int, default=300)
             p.add_argument('--resume', action='store_true')
