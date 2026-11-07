@@ -1,1 +1,1 @@
-print("i super duper like turtles")
+print("this is the outdated statement on todays date")
