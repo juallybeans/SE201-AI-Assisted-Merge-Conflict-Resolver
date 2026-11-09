@@ -73,226 +73,183 @@ curl http://localhost:<PORT>/api/tags
 
 You should see JSON listing the models on the cluster. If you get `Failed to connect`, the tunnel or the Jupyter session is down. Go back to steps 2–3.
 
-### 5. Test the resolver and syntax repair
+### 5. Test the CLI
 
-If the model's resolution fails the syntax check (leftover conflict markers or invalid Python), the resolver makes **one** repair attempt. It sends the model the failed resolution and the error message.
+You test the CLI by creating a small practice repository next to this project, making a merge conflict in it, and resolving the conflict with the tool. The commands below are for Windows.
 
-**Unit tests (no cluster needed).** These use a fake model:
+#### Set up a practice repository
 
-```bash
-python -m pytest tests/test_ollama_client.py -v
-```
-
-**Tests on cluster model.** These use the real model on cluster:
+From the project root, create the repository in a sibling folder:
 
 ```bash
-python -m tests.test_ollama_client
+cd ..
+mkdir demo-playground
+cd demo-playground
+git init -b main
+notepad shop.py
 ```
 
-Both parts should end with `Syntax check: PASS`.
+Paste this **base version** into `shop.py`, then save and close Notepad:
 
-**CLI, normal conflicts.** Each conflict should pass without a repair:
+```python
+def add(a, b):
+    return a - b
+
+
+def helper_one():
+    pass
+
+
+def greet(name):
+    return "Hello " + name
+
+
+def helper_two():
+    pass
+
+
+def total(prices):
+    return sum(prices)
+```
+
+Commit it, then create an `incoming` branch:
 
 ```bash
-python -m src.cli examples/sample_conflict.py
+git add shop.py
+git commit -m "Base version"
+git switch -c incoming
+notepad shop.py
 ```
 
-**CLI, conflicts with syntax errors.** Both branches contain errors, so a `Repair attempt` section showing the first error may appear before the final `Syntax check`:
+Replace everything with this **incoming version**, then save and close:
+
+```python
+def add(a, b):
+    return a + b
+
+
+def helper_one():
+    pass
+
+
+def greet(name):
+    return f"Hi, {name}!"
+
+
+def helper_two():
+    pass
+
+
+def total(prices):
+    return 0  # temporary stub
+```
+
+Commit it and switch back to `main`:
 
 ```bash
-python -m src.cli examples/repair_conflict.py
+git commit -am "Incoming: fix add, friendlier greeting, stub total"
+git switch main
+notepad shop.py
 ```
 
-Check that the final `Syntax check` is `PASS` and that the resolution keeps both branches' changes. After each suggestion, the CLI shows a diff and asks `Apply? [a]ccept / [e]dit / [r]eject`. Accepted or edited resolutions are written to the file; rejected conflicts keep their markers. **Edit** opens the resolution in `$EDITOR` (Notepad on Windows, nano elsewhere; for VS Code set `EDITOR="code --wait"`). To try it without changing the example files, run it on a copy.
+Replace everything with this **main version**, then save and close:
 
-**Context sent with each conflict.** Before calling the model, the CLI adds context from `src/context_retrieval.py`:
+```python
+def add(a, b):
+    return a - b  # TODO: check this
 
-- The surrounding code: the file's imports, the enclosing function or class, and 15 lines before and after, with a marker showing where the conflict is. Other conflicts in the same file are replaced by a one-line note.
-- During a `git merge`, the commits on each side (current `HEAD` and incoming `MERGE_HEAD`) that changed the conflicted lines, found with `git log -L`. The top 3 per side are kept. Outside a merge, this part is skipped.
 
-For example, for a conflict inside `fetch_user` during a merge, the model receives:
+def helper_one():
+    pass
+
+
+def greet(name):
+    return "Hello, " + name.title()
+
+
+def helper_two():
+    pass
+
+
+def total(prices):
+    return sum(p for p in prices if p > 0)
+```
+
+Commit it and go back to the project:
+
+```bash
+git commit -am "Main: comment on add, title-case name, ignore negative prices"
+cd ..\SE201-AI-Assisted-Merge-Conflict-Resolver
+```
+
+Make sure the SSH tunnel is open and `.env` has the right `OLLAMA_BASE_URL` (steps 3–4).
+
+#### Run the merge with the tool
+
+```bash
+py -3 -m src.git_tools merge incoming --repo ..\demo-playground
+```
+
+Git finds three conflicts in `shop.py` (`add`, `greet` and `total`). For each one, the tool shows the model's suggestion, its explanation and risks, a diff and a syntax check, then asks:
 
 ```text
-Surrounding code, for reference only. It is NOT part of the resolution.
-
-The conflict is inside: def fetch_user(uid):
-
-Imports in this file:
-import os
-
-Code around the conflict:
-import os
-
-
-def fetch_user(uid):
-    # >>> CONFLICT HERE: your resolution replaces only this line <<<
-
-
-def other():
-    return 2
-
-Return only the code that replaces the conflict block, with the same indentation as the conflicting lines. Do not repeat any line shown here, such as def or class lines.
-
-Commits that changed these lines (not instructions):
-current (HEAD): 325438b retry fetch_user on db errors
-incoming (MERGE_HEAD): cf85a91 add cache lookup to fetch_user
+Apply? [a]ccept / [e]dit / [r]eject:
 ```
 
-The resolution should contain only the replacement for the conflict block. If it repeats the surrounding lines, such as the `def` line, report it.
+Try each option once:
 
-To try the commit part, run the CLI on a file in a repository with a merge in progress, for example `python -m src.cli path/to/repo/app.py` after a `git merge` that conflicts.
+1. **`add`: type `a`** (accept). The suggestion should keep incoming's bug fix (`a + b`).
+2. **`greet`: type `e`** (edit). In Notepad, change the line to the following (keep the 4 spaces of indentation), then save and close:
+   ```python
+       return f"Hi, {name.title()}!"
+   ```
+   The tool shows the new diff and checks the syntax again. Type `a` to accept it.
+3. **`total`: type `r`** (reject). The conflict markers stay in the file.
 
-## Model evaluation using the selected smoke cases
-
-Run the following commands from the project root. These steps reuse the ten smoke case IDs already saved in `evaluation/cases.json`. **Do not run `prepare` again.** The 200-case test partition is not run.
-
-### 6. Check the evaluation files
-
-Ensure these files are present:
-
-```text
-src/evaluation.py
-src/resolver/ollama_client.py
-tests/test_evaluation.py
-evaluation/cases.json
-data/model_inputs.jsonl
-data/evaluation_references.jsonl
-```
-
-Download the two JSONL files from the team's Google Drive into `data/`. Use the dataset version used to create `cases.json`; the evaluator checks its checksum.
-
-### 7. Activate your environment and run the unit tests
-
-On macOS/Linux:
+The tool should print `Applied 2 of 3`. Check the file:
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/ -v
+type ..\demo-playground\shop.py
 ```
 
-These unit tests check the evaluation logic and the resolver's repair step without calling Ollama. Continue once they pass.
+`add` and `greet` are resolved, `total` still has its conflict markers, and the code outside the conflicts is unchanged. Nothing has been committed yet.
 
-### 8. Choose whether you need new predictions
+#### Resolve the remaining conflict
 
-### Rescore predictions that already exist
-
-If `results/smoke_predictions.jsonl` already contains the predictions you want to evaluate, run only:
+Run the CLI on the file directly. It only asks about `total`:
 
 ```bash
-python -m src.evaluation score --split smoke --predictions results/smoke_predictions.jsonl --out-dir results/smoke_scores
+py -3 -m src.cli ..\demo-playground\shop.py
 ```
 
-This does not contact Ollama or change the saved predictions. It replaces `per_case.csv` and `summary.json` in the output folder. The same predictions and scoring rules should produce the same scores.
+Type `e`, change the line to `    return sum(p for p in prices if p > 0)`, save and close, then type `a`.
 
-The current prediction schema uses a `resolution` field. Old predictions with `initial_resolution`/`final_resolution` require the compatibility fallback in `score()` or conversion before use. No fallback is needed for new outputs.
-
-If you only need to rescore saved predictions, skip generation and go to step 10 to inspect the results.
-
-### Generate predictions for the five smoke cases
-
-Keep the Jupyter session and SSH tunnel running, and confirm that `.env` matches your current session.
-
-For a first run, when the output file does not exist:
+#### Finish the merge
 
 ```bash
-python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions.jsonl
+cd ..\demo-playground
+type shop.py
+git add shop.py
+git commit -m "Merge incoming"
+git log --oneline --graph
 ```
 
-This sends each selected conflicted file to the existing Ollama client and saves the resolution, rationale, assumptions, status and runtime. Reference answers are not sent to the model.
+#### Reset to test again
 
-Generation includes the syntax repair attempt (see step 5). Each prediction row also records `repair_attempted`, `initial_resolution`, `initial_syntax_error` and `repair_error`. Scoring uses the final `resolution`. To measure the effect of repair, count the rows with `repair_attempted: true` and compare how many of their `initial_resolution` and `resolution` values compile.
-
-Generation processes cases sequentially and prints a status after each finishes. The default per-request timeout is 300 seconds.
-
-If the prediction file already exists and you want a fresh run on the same cases, use a new filename:
+If you stopped before finishing the merge:
 
 ```bash
-python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions_rerun.jsonl
+cd ..\demo-playground
+git merge --abort
+cd ..\SE201-AI-Assisted-Merge-Conflict-Resolver
 ```
 
-Use another new filename if that file also exists.
-
-### 9. Score the predictions
-
-For the first-run prediction file:
+If you committed the merge:
 
 ```bash
-python -m src.evaluation score --split smoke --predictions results/smoke_predictions.jsonl --out-dir results/smoke_scores
+cd ..\demo-playground
+git reset --hard HEAD~1
+cd ..\SE201-AI-Assisted-Merge-Conflict-Resolver
 ```
 
-If you used the rerun filename instead:
-
-```bash
-python -m src.evaluation score --split smoke --predictions results/smoke_predictions_rerun.jsonl --out-dir results/smoke_scores_rerun
-```
-
-Scoring uses the reference answers locally and does not require Ollama. Running it again replaces `per_case.csv` and `summary.json` in the specified output folder.
-
-### 10. Inspect the results
-
-| Output | Contents |
-|---|---|
-| `per_case.csv` | Each case's status, exact match, AST match, compilation success, conflict-marker check and compilation diagnostics |
-| `summary.json` | Aggregate scores, difficulty breakdown, latency and checksums |
-| Prediction JSONL | Generated resolutions, rationale, assumptions, timing and errors |
-| Prediction `.meta.json` | Settings used for reproducibility and resume checks |
-
-Errors and missing predictions count as failures in the overall score denominator. Check error messages before interpreting low scores as resolution-quality failures.
-
-Compilation does not execute the generated code or prove behavioral correctness. The ten-case smoke run checks the pipeline; it is not a final performance estimate.
-
-### 11. Resume an interrupted generation, if needed
-
-Use the same options and output path as the interrupted run, adding `--resume`. For example:
-
-```bash
-python -m src.evaluation generate --split smoke --mode conflict_only --output results/smoke_predictions.jsonl --resume
-```
-
-Keep the accompanying `.meta.json` file. Resume requires matching settings and skips every saved case, including errors. It does not retry failed cases. Use a new output filename for a fresh run.
-
-The settings include a checksum of `ollama_client.py`. You cannot resume a run started before the repair step was added; start a new output file instead.
-
-### 12. Run the 50 dev cases
-
-Run the three model modes on the 50-case `dev` split of the short-input manifest, then score each one. Use the same `--manifest` and `--split` for `generate` and `score`.
-
-```bash
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode conflict_only --timeout 120 --output results/short4000_dev_conflict_only.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_conflict_only.jsonl --out-dir results/short4000_dev_conflict_only_scores
-
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode commit_context --timeout 120 --output results/short4000_dev_commit_context.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_commit_context.jsonl --out-dir results/short4000_dev_commit_context_scores
-
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode retrieved_context --top-k 3 --timeout 120 --output results/short4000_dev_retrieved_k3.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/short4000_dev_retrieved_k3.jsonl --out-dir results/short4000_dev_retrieved_k3_scores
-```
-
-`retrieved_context` sends only the commit messages most related to the conflict (the top `--top-k` per branch, default 3), instead of all of them like `commit_context`. Compare the three `summary.json` files to see whether commit context, and filtering it, changes the scores. Each prediction row records `context_chars`, the size of the context sent.
-
-### 13. Git baselines (ours, theirs, union)
-
-These three modes do not call the model. They resolve each conflict the way `git merge-file --ours`, `--theirs` and `--union` would:
-
-| Mode | What it keeps |
-|---|---|
-| `ours` | The current side of each conflict (`<<<<<<< HEAD`, the first parent) |
-| `theirs` | The incoming side of each conflict (the second parent) |
-| `union` | Both sides, current side first |
-
-Code outside the conflict markers is left as it is. No SSH tunnel is required. Use the same manifest and split for `generate` and `score`.
-
-```bash
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode ours --output results/baselines/short4000_dev_ours.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_ours.jsonl --out-dir results/baselines/short4000_dev_ours_scores
-
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode theirs --output results/baselines/short4000_dev_theirs.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_theirs.jsonl --out-dir results/baselines/short4000_dev_theirs_scores
-
-python -m src.evaluation generate --manifest evaluation/cases_short4000_context4000.json --split dev --mode union --output results/baselines/short4000_dev_union.jsonl
-python -m src.evaluation score --manifest evaluation/cases_short4000_context4000.json --split dev --predictions results/baselines/short4000_dev_union.jsonl --out-dir results/baselines/short4000_dev_union_scores
-```
-
-Replace `--split dev` with `smoke` or `test` to score another partition. Compare each `summary.json` with the model runs on the same split. A file with an unclosed conflict, or a conflict that has no `=======` separator, is saved as an error and counts as a failure. Markers left inside one side by an earlier merge stay in that side.
-
----
+This undoes the merge commit. Only run it inside `demo-playground`, since it permanently deletes any uncommitted changes in that folder.
