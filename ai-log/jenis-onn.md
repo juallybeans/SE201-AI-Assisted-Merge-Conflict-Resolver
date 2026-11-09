@@ -127,3 +127,31 @@ I ran `python -m pytest tests/test_context_retrieval.py -v` and all tests passed
 ### What I kept or changed
 I kept the new test_context_retrieval.py.
 
+## 2026-11-07 · Resolving one conflict block at a time (src/hunks.py)
+- **Tool (model):** Claude Code (Claude Opus 5.5)
+- **Files:** src/hunks.py (new)
+- **Outcome:** Kept, with a change to fit()
+
+### What I asked for
+After the 200-case test run, I found the model lost or rewrote most of the code outside the conflicts, because it had to write the whole file back out. I asked for a way to send the model one conflict block at a time and copy the rest of the file unchanged, the same way the git baselines work.
+
+### How I checked it
+I read through hunks.py to check how it works. find_hunks() reuses the marker parsing from baselines.py, so both find the same conflict blocks. resolve_file() sends each block to the model with its surrounding code as context, then pastes the answers back into the file. fit() restores indentation that the model strips. The syntax repair checks the whole spliced file, then repairs the block the error points at. I ran the unit tests in tests/test_hunks.py, which check that a fake model always answering "ours" or "theirs" reproduces git's ours or theirs baseline byte for byte, and that the code outside the blocks is untouched.
+
+### What I kept or changed
+I kept find_hunks(), resolve_file() and the whole-file repair. I changed fit() so that it ignores the base section of diff3-style conflicts when working out the indentation, and copies the original indentation characters (so tabs stay tabs) instead of always using spaces.
+
+## 2026-11-07 · Unit tests for hunks.py and the new evaluation modes
+- **Tool (model):** Claude (Sonnet 5.5)
+- **Files:** tests/test_hunks.py (new), tests/test_evaluation.py (updated)
+- **Outcome:** Kept
+
+### What I asked for
+Help writing unit tests for the new src/hunks.py (splitting a file into conflict blocks, resolving each block separately, putting the answers back into the file and making one repair attempt on a syntax error), and updating tests/test_evaluation.py for the new evaluation.py. The new evaluation.py adds the git baselines (ours, theirs, union), the --per-hunk option, extra result fields for the repair attempt, and a code argument for build_context.
+
+### How I checked it
+I ran `python -m pytest tests/test_hunks.py -v` against my real baselines.py and it passed with 78 tests passed and 2 expected failures. I read through the new test cases and checked that the expected results match how block splitting, indentation, the repair attempt, the baselines and --per-hunk should behave. The tests are written by a different model from the one that generated hunks.py.
+
+### What I kept or changed
+I kept the new test_hunks.py and the updated test_evaluation.py.
+
